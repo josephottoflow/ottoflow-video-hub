@@ -1,0 +1,31 @@
+{
+  "images": [
+    "content/ultralight-foldable-camping-chair/images/frame-01.png",
+    "content/ultralight-foldable-camping-chair/images/frame-02.png",
+    "content/ultralight-foldable-camping-chair/images/frame-03.png",
+    "content/ultralight-foldable-camping-chair/images/frame-04.png",
+    "content/ultralight-foldable-camping-chair/images/frame-05.png",
+    "content/ultralight-foldable-camping-chair/images/frame-06.png"
+  ],
+  "headline": "Ultralight Camping Chair",
+  "subheadline": "Sets up in seconds — sturdy aluminum frame",
+  "problemText": "Still searching for the perfect camping chair?",
+  "bulletPoints": [],
+  "cta": "Shop Now",
+  "theme": "outdoor",
+  "colorHint": "#22c55e",
+  "price": "$29.99",
+  "ctaStyle": "tiktok-basket",
+  "socialProof": {
+    "number": 15400,
+    "label": "Happy Campers"
+  },
+  "backgroundImages": [
+    "https://videos.pexels.com/video-files/6394054/6394054-hd_1080_1920_25fps.mp4",
+    "https://videos.pexels.com/video-files/34142319/14476178_1080_1920_60fps.mp4",
+    "https://videos.pexels.com/video-files/30009146/12875267_1080_1920_30fps.mp4",
+    "https://videos.pexels.com/video-files/37218116/15766888_1080_1920_30fps.mp4",
+    "https://videos.pexels.com/video-files/28265425/12344352_1080_1920_60fps.mp4",
+    "https://videos.pexels.com/video-files/19281575/19281575-hd_1080_1920_30fps.mp4"
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "productSlug": "ultralight-foldable-camping-chair",
+  "brandColors": {
+    "primary": "#6366f1",
+    "secondary": "#8b5cf6",
+    "accent": "#f59e0b",
+    "background": "#0a0a0a",
+    "text": "#ffffff"
+  },
+  "hook": {
+    "painPointQuestion": "Tired of uncomfortable seating at the campsite? This ultralight foldable camping chair sets up in seconds with a sturdy aluminum frame and breathable polyester seat"
+  },
+  "productIntro": {
+    "productName": "Ultralight Foldable Camping Chair",
+    "tagline": "Tired of uncomfortable seating at the campsite? This ultralight foldable camping chair sets up in seconds with a sturdy aluminum frame and breathable polyester seat"
+  },
+  "simulatedDemo": {
+    "inputPlaceholder": "Search for products...",
+    "typedText": "Ultralight Foldable Camping Chair",
+    "buttonText": "Shop Now",
+    "resultText": "Ultralight Foldable Camping Chair — Available Now!",
+    "resultSubtext": "#CampingChair #OutdoorGear #CampingEssentials"
+  },
+  "imageShowcase": {
+    "images": [
+      {
+        "path": "content/ultralight-foldable-camping-chair/images/frame-01.png",
+        "headline": "Premium Quality"
+      },
+      {
+        "path": "content/ultralight-foldable-camping-chair/images/frame-02.png",
+        "headline": "Best Seller"
+      },
+      {
+        "path": "content/ultralight-foldable-camping-chair/images/frame-03.png",
+        "headline": "Top Rated"
+      },
+      {
+        "path": "content/ultralight-foldable-camping-chair/images/frame-04.png",
+        "headline": "Must Have"
+      }
+    ]
+  },
+  "featureCallouts": {
+    "productImagePath": "content/ultralight-foldable-camping-chair/images/frame-01.png",
+    "features": [
+      {
+        "icon": "check",
+        "text": "Premium quality guaranteed"
+      },
+      {
+        "icon": "lightning",
+        "text": "Fast shipping available"
+      },
+      {
+        "icon": "star",
+        "text": "Trending on TikTok Shop"
+      }
+    ]
+  },
+  "socialProofCta": {
+    "socialProofNumber": 10000,
+    "socialProofLabel": "happy customers",
+    "ctaUrl": "Link in bio ↗"
+  }
+}

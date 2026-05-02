@@ -1,0 +1,20 @@
+{
+  "name": "unboxing",
+  "displayName": "Unboxing",
+  "description": "Product unboxing/reveal template — package shot, step-by-step unboxing, product showcase gallery, features, social proof, CTA",
+  "fps": 30,
+  "width": 1080,
+  "height": 1920,
+  "totalFrames": 975,
+  "totalSeconds": 32.5,
+  "scenes": [
+    { "name": "TextHook", "style": "text-slam", "durationSec": 3 },
+    { "name": "PackageReveal", "style": "image-reveal", "durationSec": 5 },
+    { "name": "Unboxing", "style": "image-gallery", "durationSec": 6 },
+    { "name": "ProductShowcase", "style": "image-gallery", "durationSec": 6 },
+    { "name": "Features", "style": "feature-list", "durationSec": 5 },
+    { "name": "SocialProof", "style": "social-proof", "durationSec": 4 },
+    { "name": "CTA", "style": "cta", "durationSec": 3.5 }
+  ],
+  "dataType": "product"
+}

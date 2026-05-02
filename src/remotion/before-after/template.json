@@ -1,0 +1,47 @@
+{
+  "name": "before-after",
+  "displayName": "BeforeAfter",
+  "description": "BeforeAfter video template",
+  "fps": 30,
+  "width": 1080,
+  "height": 1920,
+  "scenes": [
+    {
+      "name": "Hook",
+      "label": "Hook",
+      "durationSec": 3,
+      "style": "text-slam"
+    },
+    {
+      "name": "ProductA",
+      "label": "Product A",
+      "durationSec": 5,
+      "style": "image-reveal"
+    },
+    {
+      "name": "ProductB",
+      "label": "Product B",
+      "durationSec": 5,
+      "style": "image-reveal"
+    },
+    {
+      "name": "Comparison",
+      "label": "Side by Side",
+      "durationSec": 6,
+      "style": "split-compare"
+    },
+    {
+      "name": "Winner",
+      "label": "Winner",
+      "durationSec": 4,
+      "style": "feature-list"
+    },
+    {
+      "name": "CTA",
+      "label": "CTA",
+      "durationSec": 3.5,
+      "style": "cta"
+    }
+  ],
+  "dataType": "product"
+}

@@ -1,0 +1,55 @@
+{
+  "productSlug": "outdoor-camping-chair",
+  "brandColors": {
+    "primary": "#1a73e8",
+    "secondary": "#0d47a1",
+    "accent": "#ff6d00",
+    "background": "#0a0a0a",
+    "text": "#ffffff"
+  },
+  "hook": {
+    "painPointQuestion": "Is your home actually safe when you're not there? 👀"
+  },
+  "productIntro": {
+    "productName": "Security Check",
+    "tagline": "Your Safety. Always Verified.",
+    "logoPath": ""
+  },
+  "simulatedDemo": {
+    "inputPlaceholder": "Enter your address or property to check...",
+    "typedText": "123 Maple Street — run full security audit",
+    "buttonText": "Check Now",
+    "resultText": "✅ Security Report Ready — 3 Vulnerabilities Found & Fixed!",
+    "resultSubtext": "Front entry, back window & garage all flagged & secured 🔒"
+  },
+  "imageShowcase": {
+    "images": [
+      {
+        "path": "D:\\PRODUCTS\\TEST\\temp\\outdoor-camping-chair\\processed\\frame-01.png",
+        "headline": "Full Protection At Your Fingertips"
+      }
+    ]
+  },
+  "featureCallouts": {
+    "features": [
+      {
+        "icon": "shield",
+        "text": "Real-time threat detection & alerts"
+      },
+      {
+        "icon": "zap",
+        "text": "Instant vulnerability scan results"
+      },
+      {
+        "icon": "check",
+        "text": "Peace of mind — 24/7 coverage"
+      }
+    ],
+    "productImagePath": "D:\\PRODUCTS\\TEST\\temp\\outdoor-camping-chair\\processed\\frame-01.png"
+  },
+  "socialProofCta": {
+    "socialProofNumber": 47000,
+    "socialProofLabel": "homes protected",
+    "ctaUrl": "Link in bio ↗"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "data": {
+    "images": [
+      "content/ultralight-foldable-camping-chair/images/frame-01.png",
+      "content/ultralight-foldable-camping-chair/images/frame-02.png",
+      "content/ultralight-foldable-camping-chair/images/frame-03.png",
+      "content/ultralight-foldable-camping-chair/images/frame-04.png",
+      "content/ultralight-foldable-camping-chair/images/frame-05.png",
+      "content/ultralight-foldable-camping-chair/images/frame-06.png"
+    ],
+    "headline": "Ultralight Camping Chair",
+    "subheadline": "Sets up in seconds — sturdy aluminum frame",
+    "bulletPoints": [
+      "Premium quality guaranteed",
+      "Fast shipping available",
+      "Trending on TikTok Shop"
+    ],
+    "cta": "Shop Now — Link in Bio",
+    "theme": "outdoor",
+    "colorHint": "#22c55e"
+  }
+}
