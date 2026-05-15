@@ -6,16 +6,16 @@ import { Toaster, toast } from "sonner";
 import {
   LayoutDashboard, List, Bot, Star, Share2,
   Play, RefreshCw, Loader2, ChevronRight, Plus,
-  CheckCircle2, XCircle, Clock, Zap, Music2,
+  CheckCircle2, XCircle, Zap, Music2,
   Film, Send, FileSpreadsheet, Wand2, Clapperboard,
   Image, Tag, Video, Terminal, Eye, FolderOpen,
-  Activity, TrendingUp, Layers, Hash,
+  Activity, TrendingUp, Layers, Hash, PenLine,
 } from "lucide-react";
 import { RemotionPreview } from "./components/RemotionPreview";
 
 // ─── Types ────────────────────────────────────────────────────
 
-type View   = "center" | "queue" | "agents" | "social" | "review";
+type View   = "center" | "queue" | "agents" | "social" | "review" | "generate";
 type Status = "idle" | "running" | "done" | "error";
 type Tier   = "basic" | "advanced";
 
@@ -54,11 +54,12 @@ const V2_PIPELINE_AGENTS = [
 ];
 
 const NAV: { id: View; label: string; Icon: React.ElementType }[] = [
-  { id: "center", label: "Command Center", Icon: LayoutDashboard },
-  { id: "queue",  label: "Content Queue",  Icon: List },
-  { id: "agents", label: "Agents",         Icon: Bot },
-  { id: "review", label: "Quality Review", Icon: Star },
-  { id: "social", label: "Social Media",   Icon: Share2 },
+  { id: "center",   label: "Command Center", Icon: LayoutDashboard },
+  { id: "generate", label: "Own Topic",      Icon: PenLine },
+  { id: "queue",    label: "Content Queue",  Icon: List },
+  { id: "agents",   label: "Agents",         Icon: Bot },
+  { id: "review",   label: "Quality Review", Icon: Star },
+  { id: "social",   label: "Social Media",   Icon: Share2 },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -1059,6 +1060,176 @@ function ReviewView() {
   );
 }
 
+// ─── Own Topic ────────────────────────────────────────────────
+
+const OWN_TOPIC_TEMPLATES = [
+  { id: "listicle",    label: "Top N List",   Icon: List,         desc: "Numbered tips & rankings — highest shareability" },
+  { id: "stats-story", label: "Stats Story",  Icon: TrendingUp,   desc: "Bold data-driven narrative with big numbers" },
+  { id: "tutorial",    label: "Tutorial",     Icon: Layers,       desc: "Step-by-step how-to — great for education" },
+  { id: "myth-buster", label: "Myth Buster",  Icon: XCircle,      desc: "Fact vs fiction — debunk and educate" },
+  { id: "quote-card",  label: "Quote Card",   Icon: Star,         desc: "Viral quote with branded full-screen visual" },
+  { id: "cinematic",   label: "Cinematic",    Icon: Clapperboard, desc: "Premium branded cinematic look" },
+];
+
+const OWN_TOPIC_STYLES = ["Educational", "Motivational", "Case Study", "Lifestyle", "Startup-focused", "Luxury", "Neon"];
+
+function OwnTopicView({ onGenerate }: { onGenerate: () => void }) {
+  const [topic,      setTopic]      = useState("");
+  const [style,      setStyle]      = useState("Educational");
+  const [template,   setTemplate]   = useState("listicle");
+  const [generating, setGenerating] = useState(false);
+
+  const handleGenerate = async () => {
+    const t = topic.trim();
+    if (!t) { toast.error("Enter a topic first"); return; }
+    setGenerating(true);
+
+    try {
+      // Step 1: Add to Sheet1 as Pending
+      const addRes = await fetch("/api/queue/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: t, style }),
+      });
+      if (!addRes.ok) throw new Error("Failed to add topic to sheet");
+      const { rowIndex } = await addRes.json();
+
+      // Step 2: Immediately queue a render for that row
+      const renderRes = await fetch("/api/pipeline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rowIndex, template }),
+      });
+      if (!renderRes.ok) throw new Error("Failed to queue render job");
+
+      toast.success(`Queued: "${t}" — watch progress in Command Center`);
+      setTopic("");
+      onGenerate(); // navigate to Command Center
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div style={{ padding: "28px 32px", maxWidth: 860, margin: "0 auto" }}>
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 11, background: "linear-gradient(135deg,#6366f1,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 20px rgba(99,102,241,0.4)" }}>
+            <PenLine size={18} color="#fff" strokeWidth={2} />
+          </div>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", lineHeight: 1 }}>Own Topic</h1>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>Basic pipeline · Pexels backgrounds · renders on your local machine</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Topic input */}
+      <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+        <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 10 }}>
+          Topic / Prompt
+        </label>
+        <textarea
+          value={topic}
+          onChange={e => setTopic(e.target.value)}
+          placeholder="e.g. The OODA Loop — how to make faster decisions than your competitors"
+          rows={3}
+          style={{
+            width: "100%", resize: "vertical", background: "var(--bg-elevated)",
+            border: "1px solid var(--border)", borderRadius: 9, color: "var(--text)",
+            fontFamily: "inherit", fontSize: 13, padding: "11px 14px", outline: "none",
+            transition: "border-color 0.15s", boxSizing: "border-box",
+          }}
+          onFocus={e => (e.target.style.borderColor = "rgba(99,102,241,0.5)")}
+          onBlur={e  => (e.target.style.borderColor = "var(--border)")}
+        />
+        <div style={{ marginTop: 12 }}>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>Style</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {OWN_TOPIC_STYLES.map(s => (
+              <button key={s} onClick={() => setStyle(s)} style={{
+                padding: "5px 13px", borderRadius: 20, border: "1px solid var(--border)",
+                cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit",
+                background: style === s ? "var(--primary)" : "transparent",
+                color: style === s ? "#fff" : "var(--text-muted)",
+                transition: "all 0.12s",
+              }}>{s}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Template picker */}
+      <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+        <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 14 }}>
+          Template
+        </label>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+          {OWN_TOPIC_TEMPLATES.map(({ id, label, Icon, desc }) => {
+            const selected = template === id;
+            return (
+              <motion.button
+                key={id}
+                onClick={() => setTemplate(id)}
+                whileHover={{ y: -2 }}
+                transition={{ duration: 0.12 }}
+                style={{
+                  background: selected ? "rgba(99,102,241,0.12)" : "var(--bg-elevated)",
+                  border: `1px solid ${selected ? "rgba(99,102,241,0.45)" : "var(--border)"}`,
+                  borderRadius: 11, padding: "14px 14px 12px",
+                  cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+                  boxShadow: selected ? "0 0 0 1px rgba(99,102,241,0.2), 0 4px 16px rgba(99,102,241,0.15)" : "none",
+                  transition: "border-color 0.15s, background 0.15s",
+                }}
+              >
+                <div style={{ width: 34, height: 34, borderRadius: 9, marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", background: selected ? "linear-gradient(135deg,#6366f1,#a78bfa)" : "var(--bg)", border: `1px solid ${selected ? "transparent" : "var(--border)"}`, transition: "all 0.15s" }}>
+                  <Icon size={15} color={selected ? "#fff" : "var(--text-muted)"} strokeWidth={selected ? 2.5 : 1.8} />
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: selected ? "var(--accent)" : "var(--text)", marginBottom: 4 }}>{label}</div>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.55 }}>{desc}</div>
+                {selected && (
+                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}>
+                    <CheckCircle2 size={10} color="var(--accent)" />
+                    <span style={{ fontSize: 9, fontWeight: 700, color: "var(--accent)", letterSpacing: "0.4px" }}>SELECTED</span>
+                  </div>
+                )}
+              </motion.button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Generate button */}
+      <button
+        onClick={handleGenerate}
+        disabled={generating || !topic.trim()}
+        style={{
+          width: "100%", padding: "14px 24px", borderRadius: 11,
+          border: "none", cursor: generating || !topic.trim() ? "not-allowed" : "pointer",
+          background: generating || !topic.trim()
+            ? "var(--bg-elevated)"
+            : "linear-gradient(135deg,#6366f1 0%,#a78bfa 100%)",
+          color: generating || !topic.trim() ? "var(--text-muted)" : "#fff",
+          fontFamily: "inherit", fontSize: 14, fontWeight: 700, letterSpacing: "-0.2px",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          boxShadow: generating || !topic.trim() ? "none" : "0 4px 20px rgba(99,102,241,0.4)",
+          transition: "all 0.2s",
+        }}
+      >
+        {generating
+          ? <><Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> Adding to queue &amp; rendering…</>
+          : <><Play size={14} fill="currentColor" /> Generate Video</>}
+      </button>
+
+      <p style={{ marginTop: 12, fontSize: 11, color: "var(--text-muted)", textAlign: "center", lineHeight: 1.7 }}>
+        Topic is saved to Sheet1 then immediately queued. Make sure your local worker (<code style={{ fontFamily: "monospace", background: "var(--bg-elevated)", padding: "1px 5px", borderRadius: 4 }}>npm run worker</code>) is running.
+      </p>
+    </div>
+  );
+}
+
 // ─── Root ─────────────────────────────────────────────────────
 
 export default function App() {
@@ -1088,7 +1259,7 @@ export default function App() {
       />
       <div style={{ display: "flex", minHeight: "100vh" }}>
         <Sidebar view={view} setView={setView} pipeStatus={pipeStatus} activeAgent={activeAgent} />
-        <main style={{ flex: 1, minWidth: 0, overflowY: view === "center" ? "hidden" : "auto", height: view === "center" ? "100vh" : undefined, display: "flex", flexDirection: "column", position: "relative" }}>
+        <main style={{ flex: 1, minWidth: 0, overflowY: view === "center" ? "hidden" : "auto", height: view === "center" ? "100vh" : undefined, display: "flex", flexDirection: "column", position: "relative", background: "var(--bg)" }}>
           <AnimatePresence mode="wait">
             <motion.div
               key={view}
@@ -1098,11 +1269,12 @@ export default function App() {
               transition={{ duration: 0.16, ease: "easeOut" }}
               style={{ flex: 1, display: "flex", flexDirection: "column", height: view === "center" ? "100vh" : undefined }}
             >
-              {view === "center"  && <CommandCenterView tier={tier} setTier={setTier} />}
-              {view === "queue"   && <QueueView tier={tier} />}
-              {view === "agents"  && <AgentsView />}
-              {view === "review"  && <ReviewView />}
-              {view === "social"  && <SocialView />}
+              {view === "center"   && <CommandCenterView tier={tier} setTier={setTier} />}
+              {view === "generate" && <OwnTopicView onGenerate={() => setView("center")} />}
+              {view === "queue"    && <QueueView tier={tier} />}
+              {view === "agents"   && <AgentsView />}
+              {view === "review"   && <ReviewView />}
+              {view === "social"   && <SocialView />}
             </motion.div>
           </AnimatePresence>
         </main>
