@@ -1,0 +1,239 @@
+{
+  "name": "Ottoflow Video Hub — Content Processor",
+  "projectId": "3oBJRXrafchYWlAs",
+  "nodes": [
+    {
+      "id": "node-trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 300],
+      "parameters": {}
+    },
+    {
+      "id": "node-read-sheet",
+      "name": "Get Pending Rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [240, 300],
+      "parameters": {
+        "documentId": {"__rl": true, "value": "1vxzv5oo64gsu95KhdLvzE50Snpvk4d7luTDKmjCbcGg", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "gid=0", "mode": "id"},
+        "filtersUI": {"values": [{"lookupColumn": "Status", "lookupValue": "Pending"}]},
+        "options": {}
+      },
+      "credentials": {"googleSheetsOAuth2Api": {"id": "I12pdRDjeKOwy8oP", "name": "Google Sheets Otto"}}
+    },
+    {
+      "id": "node-mark-processing",
+      "name": "Mark Processing",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [480, 300],
+      "parameters": {
+        "operation": "update",
+        "documentId": {"__rl": true, "value": "1vxzv5oo64gsu95KhdLvzE50Snpvk4d7luTDKmjCbcGg", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "gid=0", "mode": "id"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {"Status": "Processing", "row_number": 0},
+          "matchingColumns": ["row_number"]
+        },
+        "options": {}
+      },
+      "credentials": {"googleSheetsOAuth2Api": {"id": "I12pdRDjeKOwy8oP", "name": "Google Sheets Otto"}}
+    },
+    {
+      "id": "node-context",
+      "name": "Prepare Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [720, 300],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {"name": "topic",      "value": "={{ $json.Topic }}",        "type": "string"},
+            {"name": "style",      "value": "={{ $json.Style }}",        "type": "string"},
+            {"name": "script",     "value": "={{ $json.Script }}",       "type": "string"},
+            {"name": "hookA",      "value": "={{ $json['Hook A'] }}",    "type": "string"},
+            {"name": "hookB",      "value": "={{ $json['Hook B'] }}",    "type": "string"},
+            {"name": "hookC",      "value": "={{ $json['Hook C'] }}",    "type": "string"},
+            {"name": "row_number", "value": "={{ $json.row_number }}",   "type": "number"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-check-script",
+      "name": "Script Missing?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [960, 300],
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": false, "leftValue": "", "typeValidation": "loose", "version": 1},
+          "conditions": [{"id": "cond1", "leftValue": "={{ $json.script }}", "rightValue": "", "operator": {"type": "string", "operation": "equals"}}],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "node-model-script",
+      "name": "Anthropic (Script)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.2,
+      "position": [1200, 80],
+      "parameters": {
+        "model": "claude-haiku-4-5-20251001",
+        "options": {"maxTokensToSample": 1024, "temperature": 0.7}
+      },
+      "credentials": {"anthropicApi": {"id": "OW3osAKurnQSC7S1", "name": "Anthropic account otto"}}
+    },
+    {
+      "id": "node-gen-script",
+      "name": "Generate Script",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [1200, 200],
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an elite short-form video scriptwriter.\n\nTOPIC: {{ $json.topic }}\nSTYLE: {{ $json.style }}\nEXISTING HOOKS: {{ $json.hookA || '(none)' }}, {{ $json.hookB || '(none)' }}, {{ $json.hookC || '(none)' }}\n\nWrite a complete content package. Output ONLY valid JSON:\n{\n  \"script\": \"60-80 word voiceover. Natural spoken language. Opens with hook, delivers one insight, ends with soft CTA.\",\n  \"hookA\": \"Pain-point hook, max 8 words\",\n  \"hookB\": \"Fact or number hook, max 8 words\",\n  \"hookC\": \"Direct you-language hook, max 8 words\",\n  \"wordCount\": 72\n}",
+        "messages": {"messageValues": [{"message": "You write authentic, engaging short-form video scripts. Output only valid JSON."}]}
+      }
+    },
+    {
+      "id": "node-parse-script",
+      "name": "Parse Script",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [1440, 200],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {"name": "script",     "value": "={{ (() => { try { return JSON.parse($json.text.replace(/^```json?\\n?/, '').replace(/\\n?```$/, '')).script } catch(e) { return '' } })() }}", "type": "string"},
+            {"name": "hookA",      "value": "={{ (() => { try { return JSON.parse($json.text.replace(/^```json?\\n?/, '').replace(/\\n?```$/, '')).hookA } catch(e) { return '' } })() }}", "type": "string"},
+            {"name": "hookB",      "value": "={{ (() => { try { return JSON.parse($json.text.replace(/^```json?\\n?/, '').replace(/\\n?```$/, '')).hookB } catch(e) { return '' } })() }}", "type": "string"},
+            {"name": "hookC",      "value": "={{ (() => { try { return JSON.parse($json.text.replace(/^```json?\\n?/, '').replace(/\\n?```$/, '')).hookC } catch(e) { return '' } })() }}", "type": "string"},
+            {"name": "row_number", "value": "={{ $('Prepare Context').first().json.row_number }}", "type": "number"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-passthrough",
+      "name": "Use Existing Script",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [1200, 420],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {"name": "script",     "value": "={{ $json.script }}",     "type": "string"},
+            {"name": "hookA",      "value": "={{ $json.hookA }}",      "type": "string"},
+            {"name": "hookB",      "value": "={{ $json.hookB }}",      "type": "string"},
+            {"name": "hookC",      "value": "={{ $json.hookC }}",      "type": "string"},
+            {"name": "row_number", "value": "={{ $json.row_number }}", "type": "number"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-merge",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1680, 300],
+      "parameters": {"mode": "passThrough", "output": "input1"}
+    },
+    {
+      "id": "node-model-seo",
+      "name": "Anthropic (SEO)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.2,
+      "position": [1920, 160],
+      "parameters": {
+        "model": "claude-haiku-4-5-20251001",
+        "options": {"maxTokensToSample": 512, "temperature": 0.7}
+      },
+      "credentials": {"anthropicApi": {"id": "OW3osAKurnQSC7S1", "name": "Anthropic account otto"}}
+    },
+    {
+      "id": "node-gen-seo",
+      "name": "Generate SEO",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [1920, 300],
+      "parameters": {
+        "promptType": "define",
+        "text": "=TOPIC: {{ $json.topic }}\nSTYLE: {{ $json.style }}\nHOOK: {{ $json.hookA }}\nSCRIPT: {{ $json.script.slice(0, 400) }}\n\nOutput ONLY valid JSON:\n{\n  \"title\": \"Viral title under 70 chars\",\n  \"description\": \"Engaging 200-char caption with emojis\",\n  \"hashtags\": [\"tag1\",\"tag2\",\"tag3\",\"tag4\",\"tag5\",\"tag6\",\"tag7\",\"tag8\",\"tag9\",\"tag10\"],\n  \"cta\": \"Clear call to action under 60 chars\"\n}",
+        "messages": {"messageValues": [{"message": "You are a viral social media content strategist. Output only valid JSON."}]}
+      }
+    },
+    {
+      "id": "node-parse-seo",
+      "name": "Parse SEO",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [2160, 300],
+      "parameters": {
+        "options": {},
+        "assignments": {
+          "assignments": [
+            {"name": "seoTitle",    "value": "={{ (() => { try { return JSON.parse($json.text.replace(/^```json?\\n?/, '').replace(/\\n?```$/, '')).title } catch(e) { return '' } })() }}", "type": "string"},
+            {"name": "seoDesc",     "value": "={{ (() => { try { return JSON.parse($json.text.replace(/^```json?\\n?/, '').replace(/\\n?```$/, '')).description } catch(e) { return '' } })() }}", "type": "string"},
+            {"name": "seoHashtags", "value": "={{ (() => { try { const h = JSON.parse($json.text.replace(/^```json?\\n?/, '').replace(/\\n?```$/, '')).hashtags; return Array.isArray(h) ? h.map(t => '#' + t).join(' ') : '' } catch(e) { return '' } })() }}", "type": "string"},
+            {"name": "row_number",  "value": "={{ $('Merge').first().json.row_number }}", "type": "number"}
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-save",
+      "name": "Save to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2400, 300],
+      "parameters": {
+        "operation": "update",
+        "documentId": {"__rl": true, "value": "1vxzv5oo64gsu95KhdLvzE50Snpvk4d7luTDKmjCbcGg", "mode": "id"},
+        "sheetName": {"__rl": true, "value": "gid=0", "mode": "id"},
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Script":  "={{ $('Merge').first().json.script }}",
+            "Hook A":  "={{ $('Merge').first().json.hookA }}",
+            "Hook B":  "={{ $('Merge').first().json.hookB }}",
+            "Hook C":  "={{ $('Merge').first().json.hookC }}",
+            "Status":  "Script Ready",
+            "row_number": 0
+          },
+          "matchingColumns": ["row_number"]
+        },
+        "options": {}
+      },
+      "credentials": {"googleSheetsOAuth2Api": {"id": "I12pdRDjeKOwy8oP", "name": "Google Sheets Otto"}}
+    }
+  ],
+  "connections": {
+    "Manual Trigger":     {"main": [[{"node": "Get Pending Rows",     "type": "main", "index": 0}]]},
+    "Get Pending Rows":   {"main": [[{"node": "Mark Processing",       "type": "main", "index": 0}]]},
+    "Mark Processing":    {"main": [[{"node": "Prepare Context",       "type": "main", "index": 0}]]},
+    "Prepare Context":    {"main": [[{"node": "Script Missing?",       "type": "main", "index": 0}]]},
+    "Script Missing?": {"main": [
+      [{"node": "Generate Script",     "type": "main", "index": 0}],
+      [{"node": "Use Existing Script", "type": "main", "index": 0}]
+    ]},
+    "Anthropic (Script)": {"ai_languageModel": [[{"node": "Generate Script", "type": "ai_languageModel", "index": 0}]]},
+    "Generate Script":    {"main": [[{"node": "Parse Script", "type": "main", "index": 0}]]},
+    "Parse Script":       {"main": [[{"node": "Merge", "type": "main", "index": 0}]]},
+    "Use Existing Script":{"main": [[{"node": "Merge", "type": "main", "index": 1}]]},
+    "Merge":              {"main": [[{"node": "Generate SEO", "type": "main", "index": 0}]]},
+    "Anthropic (SEO)":    {"ai_languageModel": [[{"node": "Generate SEO", "type": "ai_languageModel", "index": 0}]]},
+    "Generate SEO":       {"main": [[{"node": "Parse SEO",   "type": "main", "index": 0}]]},
+    "Parse SEO":          {"main": [[{"node": "Save to Sheet","type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"}
+}

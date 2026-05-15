@@ -1,7 +1,7 @@
 /**
  * API: /api/products
- * GET  → List all products from Google Sheet
- * POST → Add a new product row
+ * GET  → List all content rows from Google Sheet
+ * POST → Add a new content row
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -10,7 +10,7 @@ import { SheetsClient } from "@/agents/sheets/client";
 export async function GET() {
   try {
     const sheets = new SheetsClient();
-    const products = await sheets.getAllProducts();
+    const products = await sheets.getAllContent();
     return NextResponse.json({ products });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
@@ -20,18 +20,18 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { productName, tiktokLink } = await request.json();
+    const { topic, style, script, hookA, hookB, hookC } = await request.json();
 
-    if (!productName || !tiktokLink) {
+    if (!topic) {
       return NextResponse.json(
-        { error: "productName and tiktokLink are required" },
+        { error: "topic is required" },
         { status: 400 }
       );
     }
 
     const sheets = new SheetsClient();
     await sheets.initializeSheet();
-    const rowIndex = await sheets.addProduct(productName, tiktokLink);
+    const rowIndex = await sheets.addContent({ topic, style, script, hookA, hookB, hookC });
 
     return NextResponse.json({ success: true, rowIndex });
   } catch (error) {

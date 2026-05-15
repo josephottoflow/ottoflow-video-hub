@@ -110,6 +110,82 @@ export class TelegramApprovalBot {
   }
 
   /**
+   * Send the final rendered video file to Telegram.
+   * Includes caption with hooks and hashtags ready to copy-paste.
+   * Falls back to sendDocument if video upload fails (>50MB).
+   */
+  async deliverVideo(
+    videoPath: string,
+    topic: string,
+    hooks: { a: string; b: string; c: string },
+    hashtags: string[]
+  ): Promise<void> {
+    const caption = this.buildDeliveryCaption(topic, hooks, hashtags);
+
+    try {
+      await this.sendVideoFile(videoPath, caption);
+      await this.sendText(`✅ *Delivered:* ${this.escapeMarkdown(topic)}\n\n📋 Caption above — copy\\-paste to post\\.`);
+    } catch (err) {
+      // If video upload fails (e.g. >50MB), send as document
+      console.warn("[telegram] sendVideo failed, trying sendDocument:", err);
+      await this.sendDocumentFile(videoPath, caption);
+    }
+  }
+
+  /**
+   * V2: Send the rendered video with ✅ Approve / ❌ Reject / 🔄 Retry buttons.
+   * Polls for callback. Returns the decision.
+   */
+  async sendVideoForApproval(
+    videoPath: string,
+    topic:     string,
+    jobSlug:   string
+  ): Promise<ApprovalResult> {
+    const startTime = Date.now();
+    const caption   = `🎬 *V2 REVIEW*\n\n📹 ${this.escapeMarkdown(topic)}\n\n👇 Approve or reject:`;
+
+    const formData = new FormData();
+    const buffer   = fs.readFileSync(videoPath);
+    const blob     = new Blob([buffer], { type: "video/mp4" });
+
+    formData.append("chat_id",    this.chatId);
+    formData.append("video",      blob, `${jobSlug}.mp4`);
+    formData.append("caption",    caption);
+    formData.append("parse_mode", "Markdown");
+    formData.append("supports_streaming", "true");
+    formData.append(
+      "reply_markup",
+      JSON.stringify({
+        inline_keyboard: [[
+          { text: "✅ Approve", callback_data: `approve:${jobSlug}` },
+          { text: "❌ Reject",  callback_data: `reject:${jobSlug}`  },
+          { text: "🔄 Retry",  callback_data: `retry:${jobSlug}`   },
+        ]],
+      })
+    );
+
+    const res  = await fetch(`${TELEGRAM_API}${this.botToken}/sendVideo`, { method: "POST", body: formData });
+    const data = await res.json() as { ok: boolean; result?: { message_id: number }; description?: string };
+    if (!data.ok) throw new Error(`sendVideo failed: ${data.description}`);
+
+    const messageId = data.result!.message_id;
+    console.log(`[telegram] V2 approval sent for "${topic}" (msg ${messageId})`);
+
+    const decision   = await this.pollForDecision(jobSlug, messageId);
+    const waitTimeMs = Date.now() - startTime;
+
+    const statusMsg = decision === "approved"
+      ? `✅ *${this.escapeMarkdown(topic)}* approved\\! Saving to library\\.`
+      : decision === "rejected"
+      ? `❌ *${this.escapeMarkdown(topic)}* rejected\\.`
+      : `⏰ *${this.escapeMarkdown(topic)}* timed out \\(${Math.round(this.timeoutMs / 60000)}min\\)\\.`;
+
+    await this.sendText(statusMsg);
+
+    return { decision, decidedAt: new Date().toISOString(), waitTimeMs };
+  }
+
+  /**
    * Send a simple notification (no approval needed).
    */
   async notify(text: string): Promise<void> {
@@ -271,21 +347,20 @@ export class TelegramApprovalBot {
           const [action, slug] = callback.data.split(":");
 
           if (slug === productSlug) {
-            // Answer the callback to remove the loading state
+            const isApprove = action === "approve";
+            const isRetry   = action === "retry";
+
             await this.answerCallback(
               callback.id,
-              action === "approve" ? "✅ Approved!" : "❌ Rejected!"
+              isApprove ? "✅ Approved!" : isRetry ? "🔄 Queued for retry" : "❌ Rejected!"
             );
 
-            // Update the message to show the decision
             await this.editMessageButtons(
               callback.message.message_id,
-              action === "approve"
-                ? "✅ APPROVED"
-                : "❌ REJECTED"
+              isApprove ? "✅ APPROVED" : isRetry ? "🔄 RETRY REQUESTED" : "❌ REJECTED"
             );
 
-            return action === "approve" ? "approved" : "rejected";
+            return isApprove ? "approved" : "rejected";
           }
         }
       } catch {
@@ -334,6 +409,66 @@ export class TelegramApprovalBot {
         }),
       }
     );
+  }
+
+  // === Video Delivery ===
+
+  private async sendVideoFile(videoPath: string, caption: string): Promise<void> {
+    const formData = new FormData();
+    const buffer   = fs.readFileSync(videoPath);
+    const blob     = new Blob([buffer], { type: "video/mp4" });
+
+    formData.append("chat_id",    this.chatId);
+    formData.append("video",      blob, path.basename(videoPath));
+    formData.append("caption",    caption.length > 1024 ? caption.slice(0, 1020) + "..." : caption);
+    formData.append("parse_mode", "MarkdownV2");
+    formData.append("supports_streaming", "true");
+
+    const res  = await fetch(`${TELEGRAM_API}${this.botToken}/sendVideo`, {
+      method: "POST",
+      body: formData,
+    });
+    const data = await res.json() as { ok: boolean; description?: string };
+    if (!data.ok) throw new Error(`sendVideo failed: ${data.description}`);
+  }
+
+  private async sendDocumentFile(videoPath: string, caption: string): Promise<void> {
+    const formData = new FormData();
+    const buffer   = fs.readFileSync(videoPath);
+    const blob     = new Blob([buffer], { type: "video/mp4" });
+
+    formData.append("chat_id",    this.chatId);
+    formData.append("document",   blob, path.basename(videoPath));
+    formData.append("caption",    caption.length > 1024 ? caption.slice(0, 1020) + "..." : caption);
+    formData.append("parse_mode", "MarkdownV2");
+
+    const res  = await fetch(`${TELEGRAM_API}${this.botToken}/sendDocument`, {
+      method: "POST",
+      body: formData,
+    });
+    const data = await res.json() as { ok: boolean; description?: string };
+    if (!data.ok) throw new Error(`sendDocument failed: ${data.description}`);
+  }
+
+  private buildDeliveryCaption(
+    topic: string,
+    hooks: { a: string; b: string; c: string },
+    hashtags: string[]
+  ): string {
+    const esc  = (t: string) => t.replace(/([_*\[\]()~`>#+\-=|{}.!])/g, "\\$1");
+    const tags = hashtags.slice(0, 15).join(" ");
+
+    const lines = [
+      `🎬 *${esc(topic)}*`,
+      ``,
+      hooks.a ? `🪝 Hook A: ${esc(hooks.a)}` : null,
+      hooks.b ? `🪝 Hook B: ${esc(hooks.b)}` : null,
+      hooks.c ? `🪝 Hook C: ${esc(hooks.c)}` : null,
+      ``,
+      tags ? `🏷️ ${esc(tags)}` : null,
+    ].filter(Boolean);
+
+    return lines.join("\n");
   }
 
   // === Helpers ===

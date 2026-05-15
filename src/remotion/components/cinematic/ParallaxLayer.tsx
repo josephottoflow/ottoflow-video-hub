@@ -88,8 +88,3 @@ export const ParallaxLayer: React.FC<ParallaxLayerProps> = ({ theme, variant, se
     </AbsoluteFill>
   );
 };
-: "none",
-      }} />
-    </AbsoluteFill>
-  );
-};

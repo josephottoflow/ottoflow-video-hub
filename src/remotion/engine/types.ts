@@ -103,6 +103,8 @@ export interface CinematicVideoProps {
   socialProof?: SocialProofData;
   /** Optional Pexels background image URLs for atmospheric scene backgrounds */
   backgroundImages?: string[];
+  /** Scene 4 label — AI-generated per topic (e.g. "The DMAIC Steps", "3 Root Causes") */
+  featureTitle?: string;
   /** CTA style: tiktok-basket (default) or classic */
   ctaStyle?: "tiktok-basket" | "classic";
 }
@@ -221,9 +223,9 @@ export interface ImageSelection {
 
 // ─── Text Engine ────────────────────────────────────────────
 
-export type FontFamily = "Inter" | "Montserrat" | "Poppins" | "Roboto";
+export type FontFamily = "Inter" | "Montserrat" | "Poppins" | "Roboto" | "Bebas Neue" | "Space Grotesk";
 export type TextRole = "hook" | "headline" | "subheadline" | "body" | "cta" | "bullet" | "label";
-export type TextAnimation = "fadeSlideUp" | "punchScale" | "glowPulse" | "popIn" | "fadeIn" | "none";
+export type TextAnimation = "fadeSlideUp" | "punchScale" | "glowPulse" | "popIn" | "fadeIn" | "maskReveal" | "glitch" | "cascade" | "none";
 export type TextPosition = "top" | "bottom" | "center" | "topLeft" | "topRight" | "bottomLeft" | "bottomRight" | "centerLeft" | "centerRight";
 
 export interface TextStyleConfig {
@@ -315,15 +317,15 @@ export const CIN_HEIGHT = 1920;
 
 /** Scene durations in frames @ 30fps */
 export const CIN_SCENE_FRAMES = {
-  hook: 60,        // 2s  - bold attention grab
-  problem: 90,     // 3s  - pain point / supporting text
-  hero: 150,       // 5s  - main product showcase + glow
-  features: 300,   // 10s - carousel of product images
-  proof: 150,      // 5s  - lifestyle / social proof
-  cta: 90,         // 3s  - TikTok basket CTA
+  hook:     60,   // 2s   - bold attention grab
+  problem:  60,   // 2s   - pain point / supporting text
+  hero:     75,   // 2.5s - main showcase + glow
+  features: 120,  // 4s   - key details / bullet reveal
+  proof:    60,   // 2s   - lifestyle / social proof
+  cta:      75,   // 2.5s - end screen: headline + CTA
 } as const;
 
 export const CIN_TOTAL_FRAMES = Object.values(CIN_SCENE_FRAMES).reduce(
   (a, b) => a + b,
   0
-); // 840 frames = 28s
+); // 450 frames = 15s

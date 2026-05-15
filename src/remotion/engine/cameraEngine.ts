@@ -172,7 +172,3 @@ export function logCameraConfigs(configs: Record<SceneType, CameraConfig>): void
     );
   }
 }
-.toFixed(1)}px @ ${config.driftSpeed.toFixed(2)}x`
-    );
-  }
-}

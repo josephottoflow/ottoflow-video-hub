@@ -124,4 +124,3 @@ export const Transition: React.FC<TransitionProps> = ({ config, accentColor = "#
 
   return null;
 };
-};

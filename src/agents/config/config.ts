@@ -77,8 +77,8 @@ const DEFAULTS = {
 function loadConfig(): AppConfig {
   return {
     google: {
-      serviceAccountEmail: getEnv("GOOGLE_SERVICE_ACCOUNT_EMAIL"),
-      privateKey: getEnv("GOOGLE_PRIVATE_KEY").replace(/\\n/g, "\n"),
+      serviceAccountEmail: getEnvOrDefault("GOOGLE_SERVICE_ACCOUNT_EMAIL", ""),
+      privateKey: getEnvOrDefault("GOOGLE_PRIVATE_KEY", "").replace(/\\n/g, "\n"),
       spreadsheetId: getEnv("GOOGLE_SPREADSHEET_ID"),
     },
     elevenlabs: {
@@ -166,9 +166,11 @@ export function validateConfig(): {
   missing: string[];
   present: string[];
 } {
+  // Google auth: service account keys OR OAuth2 client_secret.json are both valid
+  const hasServiceAccount = !!(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY);
+  const hasOAuth = require("fs").existsSync(require("path").resolve(process.cwd(), "client_secret.json"));
+
   const required = [
-    "GOOGLE_SERVICE_ACCOUNT_EMAIL",
-    "GOOGLE_PRIVATE_KEY",
     "GOOGLE_SPREADSHEET_ID",
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_CHAT_ID",
@@ -185,6 +187,13 @@ export function validateConfig(): {
     }
   }
 
+  // Validate Google auth
+  if (!hasServiceAccount && !hasOAuth) {
+    missing.push("GOOGLE_AUTH (need GOOGLE_SERVICE_ACCOUNT_EMAIL+KEY or client_secret.json)");
+  } else {
+    present.push(hasServiceAccount ? "GOOGLE_SERVICE_ACCOUNT (service account)" : "GOOGLE_AUTH (OAuth2 client_secret.json)");
+  }
+
   return { valid: missing.length === 0, missing, present };
 }
 
@@ -192,7 +201,7 @@ export function validateConfig(): {
 
 export function generateEnvFile(values: Record<string, string> = {}): string {
   const template = `# ============================================
-# TikTok Product Video Factory — Environment
+# Ottoflow Video Hub — Environment
 # ============================================
 
 # === Google Sheets API ===

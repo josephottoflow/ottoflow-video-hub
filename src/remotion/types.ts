@@ -97,6 +97,7 @@ export const FeatureCalloutSchema = z.object({
 export const FeatureCalloutsSceneSchema = z.object({
   features: z.array(FeatureCalloutSchema).min(2).max(4),
   productImagePath: z.string().describe("Product image to show scaled down at top"),
+  featureTitle: z.string().optional().describe("Scene 4 header label — topic-specific (e.g. 'The DMAIC Steps')"),
 });
 
 export const SocialProofCtaSceneSchema = z.object({

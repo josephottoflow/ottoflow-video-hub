@@ -47,11 +47,21 @@ type CinematicCompositionProps = z.infer<typeof cinematicSchema>;
  * Convert legacy ProductVideoData to CinematicVideoProps
  */
 function convertFromLegacy(data: ProductVideoData): CinematicVideoProps {
-  const images = data.imageShowcase.images.map((img) => img.path);
+  // Only treat paths as product images if they are NOT Pexels background photos.
+  // Background photos live under /backgrounds/ — they should stay as scene backgrounds,
+  // not float as foreground "product images" inside Hero/Angle/Detail scenes.
+  const isBackgroundPath = (p: string) => p.includes("/backgrounds/") || p.includes("\\backgrounds\\");
 
-  // Add hero image if not already in the list
-  if (data.featureCallouts.productImagePath && !images.includes(data.featureCallouts.productImagePath)) {
-    images.unshift(data.featureCallouts.productImagePath);
+  const realImages = data.imageShowcase.images
+    .map((img) => img.path)
+    .filter((p) => p && !isBackgroundPath(p));
+
+  if (
+    data.featureCallouts.productImagePath &&
+    !isBackgroundPath(data.featureCallouts.productImagePath) &&
+    !realImages.includes(data.featureCallouts.productImagePath)
+  ) {
+    realImages.unshift(data.featureCallouts.productImagePath);
   }
 
   // Detect theme from brand colors
@@ -62,34 +72,39 @@ function convertFromLegacy(data: ProductVideoData): CinematicVideoProps {
   else if (primary.includes("ef4") || primary.includes("dc2")) theme = "bold";
   else if (primary.includes("a1a") || primary.includes("71717")) theme = "minimal";
 
-  // Bridge backgrounds from pipeline data → cinematic props
-  // Pipeline stores { photos: string[], videos: string[] } — prefer videos, fall back to photos
+  // Bridge backgrounds: prefer videos first, fill with photos
+  // Each scene gets its own unique background for visual variety
   let backgroundImages: string[] | undefined;
   if (data.backgrounds) {
     const videos = data.backgrounds.videos || [];
     const photos = data.backgrounds.photos || [];
-    // Prefer videos for cinematic feel, fill remaining with photos
-    backgroundImages = [...videos, ...photos].length > 0
-      ? [...videos, ...photos]
-      : undefined;
+    const combined = [...videos, ...photos];
+    backgroundImages = combined.length > 0 ? combined : undefined;
   }
 
+  // Feature callout texts — clean up any truncation artifacts
+  const bulletPoints = data.featureCallouts.features
+    .map((f) => f.text)
+    .filter((t) => t && t.trim().length > 3);
+
   return {
-    images,
+    images: realImages,
     headline: data.productIntro.productName,
     subheadline: data.productIntro.tagline,
-    bulletPoints: data.featureCallouts.features.map((f) => f.text),
-    cta: data.socialProofCta.ctaUrl || "Shop Now",
+    problemText: data.hook.painPointQuestion,
+    bulletPoints,
+    cta: data.socialProofCta.ctaUrl || "Follow for more",
     theme,
     colorHint: data.brandColors.primary,
     socialProof: data.socialProofCta.socialProofNumber
       ? {
           number: data.socialProofCta.socialProofNumber,
-          label: data.socialProofCta.socialProofLabel || "happy customers",
+          label: data.socialProofCta.socialProofLabel || "people learned this",
         }
       : undefined,
     backgroundImages,
-    ctaStyle: "tiktok-basket" as const,
+    featureTitle: data.featureCallouts.featureTitle,
+    ctaStyle: "classic" as const,
   };
 }
 
@@ -116,16 +131,7 @@ export const CinematicVideo: React.FC<CinematicCompositionProps> = ({ data }) =>
     ? data
     : convertFromLegacy(data as ProductVideoData);
 
-  // Safety: need at least 1 image
-  if (props.images.length === 0) {
-    return (
-      <AbsoluteFill style={{ backgroundColor: "#0B0B0F", justifyContent: "center", alignItems: "center" }}>
-        <div style={{ color: "#ef4444", fontSize: 32, fontWeight: 700, fontFamily: "'Inter', sans-serif" }}>
-          No images provided
-        </div>
-      </AbsoluteFill>
-    );
-  }
-
+  // Educational/explainer content has no product images — that is fine.
+  // SceneRenderer handles the zero-images case via text-only Hero + steps Detail.
   return <SceneRenderer props={props} />;
 };

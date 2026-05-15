@@ -1,17 +1,15 @@
 /**
- * RESOLVE IMAGE — Cross-compatible image URL resolver
+ * RESOLVE IMAGE — Cross-compatible image/video URL resolver
  *
- * Works in both Remotion Studio (dev preview) and CLI render.
- * - HTTP URLs pass through unchanged
- * - Local paths use staticFile() for CLI rendering
- * - Falls back to Next.js server for Studio preview
+ * Always serves through Next.js (port 3000) which reads public/ from disk.
+ * This avoids the Remotion bundle's static-copy of publicDir which is taken
+ * at bundle-build time — new downloads after the bundle is cached would 404.
  */
-import { staticFile, getRemotionEnvironment } from "remotion";
 
 const NEXTJS_BASE = "http://localhost:3000";
 
 export function resolveImage(src: string): string {
-  // Already an absolute URL
+  // Already an absolute URL — pass through unchanged
   if (src.startsWith("http://") || src.startsWith("https://")) {
     return src;
   }
@@ -19,20 +17,6 @@ export function resolveImage(src: string): string {
   // Strip leading slash if present
   const cleanPath = src.startsWith("/") ? src.slice(1) : src;
 
-  try {
-    // staticFile works for CLI rendering (bundled public dir)
-    const staticUrl = staticFile(cleanPath);
-
-    // In rendering mode, staticFile is correct
-    const env = getRemotionEnvironment();
-    if (env.isRendering) {
-      return staticUrl;
-    }
-
-    // In Studio/preview, serve from Next.js which properly handles static files
-    return `${NEXTJS_BASE}/${cleanPath}`;
-  } catch {
-    // Fallback to Next.js server
-    return `${NEXTJS_BASE}/${cleanPath}`;
-  }
+  // Serve from Next.js — always up-to-date, not limited to bundle snapshot
+  return `${NEXTJS_BASE}/${cleanPath}`;
 }

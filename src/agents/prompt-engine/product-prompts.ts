@@ -1,203 +1,279 @@
 /**
- * PROMPT ENGINE — Product Video Creative Direction (6-Scene Template)
- * Takes a product manifest and generates complete ProductVideoData:
- * brand colors, hook, intro, demo script, image showcase config,
- * feature callouts, social proof + CTA — all structured for Remotion.
+ * PROMPT ENGINE — Explainer Video Creative Director
  *
- * Uses Ollama (Llama) for structured JSON generation.
+ * Uses Claude to generate storyboard-style video data from a ContentRow.
+ * Produces kinetic-typography-ready content: short punchy sentences, no
+ * mid-word truncation, proper explainer structure.
  */
 
-import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
-import { getConfig } from "../config/config";
-import { ImageManifest } from "../ingestion/image-processor";
+import Anthropic from "@anthropic-ai/sdk";
 import { ProductVideoDataSchema } from "../../remotion/types";
 import type { ProductVideoData } from "../../remotion/types";
+import type { ContentRow } from "../sheets/client";
+import * as fs from "fs";
+import * as path from "path";
 
-// === Prompt for Full 6-Scene Creative Direction ===
+// === Style → brand colors ===
 
-const CREATIVE_DIRECTION_PROMPT = `You are a viral TikTok product video director. Generate complete creative direction for a 25-second product showcase video.
-
-PRODUCT: {{productName}}
-PRODUCT URL: {{sourceUrl}}
-NUMBER OF PRODUCT IMAGES: {{imageCount}}
-IMAGE PATHS (for reference): {{imagePaths}}
-
-Generate a JSON object with creative direction for all 6 scenes:
-
-SCENE 1 — HOOK (3s):
-- painPointQuestion: A bold, attention-grabbing question that makes viewers stop scrolling.
-  Examples: "Still editing videos manually?", "Why is everyone obsessed with this?"
-  Must relate to the product category.
-
-SCENE 2 — PRODUCT INTRO (3s):
-- productName: The actual product name
-- tagline: A punchy tagline (real one if known, or create one that sounds authentic)
-- logoPath: Leave empty string if no logo
-
-BRAND COLORS:
-- primary: Main brand color (guess from product category if unknown — tech=#6366f1, beauty=#ec4899, fitness=#10b981, food=#f59e0b)
-- secondary: Supporting color
-- accent: Highlight/CTA color (usually warm — orange, yellow, or contrasting)
-- background: "#0a0a0a" (dark)
-- text: "#ffffff"
-
-SCENE 3 — SIMULATED DEMO (8s):
-- inputPlaceholder: What goes in the input field (relates to how you'd use the product)
-- typedText: Text that types character by character (a realistic user input)
-- buttonText: CTA button text ("Get It", "Try Now", "Generate", "Shop Now")
-- resultText: What appears as the result (a benefit or outcome)
-- resultSubtext: Optional secondary text
-
-SCENE 4 — IMAGE SHOWCASE (5s):
-- images: Array of {{imageCount}} objects, each with:
-  - path: Use the actual image paths provided
-  - headline: Short (max 6 words) feature headline for each image
-
-SCENE 5 — FEATURE CALLOUTS (3s):
-- features: 3 benefit lines with icons. Use icons from: check, lightning, star, shield, zap, heart
-- productImagePath: Use the first image path
-
-SCENE 6 — SOCIAL PROOF + CTA (3s):
-- socialProofNumber: A realistic number (or null if unknown). For TikTok products, use 1000-100000 range
-- socialProofLabel: "happy customers", "units sold", "5-star reviews", etc.
-- ctaUrl: "Link in bio ↗" or "Tap the yellow bag ↗"
-
-TONE: Excited, authentic TikTok creator energy. Like someone who genuinely discovered something amazing.
-Make it feel REAL, not corporate.`;
+const STYLE_COLORS: Record<string, { primary: string; secondary: string; accent: string }> = {
+  educational:       { primary: "#6366f1", secondary: "#4f46e5", accent: "#818cf8" },
+  motivational:      { primary: "#dc2626", secondary: "#991b1b", accent: "#f87171" },
+  "case study":      { primary: "#0891b2", secondary: "#0e7490", accent: "#22d3ee" },
+  lifestyle:         { primary: "#059669", secondary: "#047857", accent: "#34d399" },
+  "startup-focused": { primary: "#7c3aed", secondary: "#6d28d9", accent: "#a78bfa" },
+  luxury:            { primary: "#d97706", secondary: "#92400e", accent: "#f59e0b" },
+  default:           { primary: "#6366f1", secondary: "#4f46e5", accent: "#818cf8" },
+};
 
 // === Prompt Engine ===
 
 export class PromptEngine {
-  private config = getConfig();
+  private client: Anthropic | null;
 
-  /**
-   * Generate complete ProductVideoData from a product manifest.
-   * This is the main entry point — returns everything Remotion needs.
-   */
-  async generateVideoData(manifest: ImageManifest): Promise<ProductVideoData> {
-    const imagePaths = manifest.images.map((img) => img.processedPath);
-
-    const prompt = CREATIVE_DIRECTION_PROMPT
-      .replace(/\{\{productName\}\}/g, manifest.productName)
-      .replace(/\{\{sourceUrl\}\}/g, manifest.sourceUrl)
-      .replace(/\{\{imageCount\}\}/g, String(manifest.totalImages))
-      .replace(/\{\{imagePaths\}\}/g, imagePaths.join(", "));
-
-    const result = await this.ollamaStructuredCompletion(
-      prompt,
-      ProductVideoDataSchema
-    );
-
-    // Ensure productSlug is set
-    result.productSlug = manifest.productSlug;
-
-    // Ensure image paths reference the actual processed images
-    result.imageShowcase.images = result.imageShowcase.images.map((img, i) => ({
-      ...img,
-      path: imagePaths[i] || imagePaths[0],
-    }));
-    result.featureCallouts.productImagePath = imagePaths[0];
-
-    // Ensure all required fields are present with proper types
-    const finalResult: ProductVideoData = {
-      productSlug: result.productSlug,
-      brandColors: {
-        primary: result.brandColors.primary,
-        secondary: result.brandColors.secondary,
-        accent: result.brandColors.accent,
-        background: result.brandColors.background || "#0a0a0a",
-        text: result.brandColors.text || "#ffffff",
-      },
-      hook: result.hook,
-      productIntro: result.productIntro,
-      simulatedDemo: result.simulatedDemo,
-      imageShowcase: result.imageShowcase,
-      featureCallouts: result.featureCallouts,
-      socialProofCta: result.socialProofCta,
-      backgrounds: result.backgrounds
-        ? {
-            photos: result.backgrounds.photos || [],
-            videos: result.backgrounds.videos || [],
-          }
-        : undefined,
-    };
-
-    return finalResult;
+  constructor() {
+    this.client = process.env.ANTHROPIC_API_KEY
+      ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+      : null;
   }
 
-  /**
-   * Generate video data and save as video-data.json for Remotion.
-   */
-  async generateAndSave(
-    manifest: ImageManifest,
-    outputDir: string
+  async generateFromContent(
+    row: ContentRow,
+    slug: string,
+    backgroundPaths: { photos: string[]; videos: string[] },
+    storyboardContext?: string
   ): Promise<ProductVideoData> {
-    const fs = await import("fs");
-    const path = await import("path");
+    if (!this.client) return this.fallbackVideoData(row, slug, backgroundPaths);
 
-    const videoData = await this.generateVideoData(manifest);
+    const styleKey = row.style.toLowerCase();
+    const colors   = STYLE_COLORS[styleKey] || STYLE_COLORS.default;
+    const bestHook = row.hookA || row.hookB || row.hookC || row.topic;
 
-    const dataPath = path.join(outputDir, "video-data.json");
-    fs.writeFileSync(dataPath, JSON.stringify(videoData, null, 2));
+    // Photo paths for image showcase (background photos, not product images)
+    const p0 = backgroundPaths.photos[0] || "";
+    const p1 = backgroundPaths.photos[1] || p0;
+    const p2 = backgroundPaths.photos[2] || p0;
+
+    const prompt = `You are a TikTok explainer video director. Write kinetic-text-ready content: short, punchy, complete phrases. NO sentences that end mid-word.
+
+TOPIC: ${row.topic}
+STYLE: ${row.style}
+HOOK OPTIONS:
+  A: ${row.hookA || "(none)"}
+  B: ${row.hookB || "(none)"}
+  C: ${row.hookC || "(none)"}
+SCRIPT (first 600 chars): ${row.script ? row.script.slice(0, 600) : "Generate from topic."}
+${storyboardContext ? `\nSTORYBOARD:\n${storyboardContext}` : ""}
+
+OUTPUT this exact JSON — fill every field. Rules:
+• painPointQuestion: Pick the BEST hook. Must be a complete thought. Max 7 words. Hook must make them stop scrolling.
+• tagline: One punchy line about the topic. Max 35 chars. Must be a complete thought.
+• typedText: What someone would Google about this topic. Max 35 chars.
+• resultText: The core insight in 8 words or fewer. COMPLETE THOUGHT.
+• resultSubtext: One word category label (e.g. "Business", "Science").
+• image headlines: Each max 3 words. Must be a complete phrase.
+• feature texts: Each max 5 words. Be punchy. COMPLETE thoughts. No cutting mid-word.
+  Good: "Reduces errors by 99.9%" — Bad: "Reduces errors by 99.9"
+• socialProofNumber: A real statistic related to the topic (companies using it, studies, etc.)
+• socialProofLabel: What the number represents, max 4 words.
+• ctaUrl: "Follow for daily insights"
+• featureTitle: Scene 4 label — make it SPECIFIC to the topic. NOT generic "How It Works".
+  Examples: "The DMAIC Steps", "3 Root Causes", "Where Teams Fail", "The Core Framework",
+  "Why It Works", "Key Principles", "Proven Results", "By The Numbers"
+
+{
+  "hook": {
+    "painPointQuestion": "<complete attention-grabbing question or statement>"
+  },
+  "productIntro": {
+    "productName": "${row.topic}",
+    "tagline": "<punchy one-liner, complete thought, ≤35 chars>"
+  },
+  "simulatedDemo": {
+    "inputPlaceholder": "Search anything...",
+    "typedText": "<what they'd Google, ≤35 chars>",
+    "buttonText": "Learn More",
+    "resultText": "<core insight, complete, ≤8 words>",
+    "resultSubtext": "<one-word category>"
+  },
+  "imageShowcase": {
+    "images": [
+      { "path": "${p0}", "headline": "<3-word phrase>" },
+      { "path": "${p1}", "headline": "<3-word phrase>" },
+      { "path": "${p2}", "headline": "<3-word phrase>" }
+    ]
+  },
+  "featureCallouts": {
+    "productImagePath": "${p0}",
+    "featureTitle": "<topic-specific scene label, ≤4 words, NOT 'How It Works'>",
+    "features": [
+      { "icon": "check",     "text": "<step or benefit, punchy, ≤5 words>" },
+      { "icon": "lightning", "text": "<step or benefit, punchy, ≤5 words>" },
+      { "icon": "star",      "text": "<step or benefit, punchy, ≤5 words>" },
+      { "icon": "shield",    "text": "<step or benefit, punchy, ≤5 words>" }
+    ]
+  },
+  "socialProofCta": {
+    "socialProofNumber": <integer>,
+    "socialProofLabel": "<4-word label>",
+    "ctaUrl": "Follow for daily insights"
+  }
+}
+
+Output ONLY the JSON. No markdown, no explanation.`;
+
+    let parsed: Record<string, unknown>;
+    try {
+      const message = await this.client.messages.create({
+        model:      "claude-sonnet-4-6",
+        max_tokens: 1024,
+        messages:   [{ role: "user", content: prompt }],
+      });
+
+      const block = message.content[0];
+      if (block.type !== "text") throw new Error("Unexpected Claude response type");
+
+      const raw = block.text.trim().replace(/^```json?\n?/, "").replace(/\n?```$/, "");
+      parsed = JSON.parse(raw) as Record<string, unknown>;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("credit") || msg.includes("quota") || msg.includes("billing")) {
+        console.warn(`[PromptEngine] API credits unavailable — using template data`);
+        return this.fallbackVideoData(row, slug, backgroundPaths);
+      }
+      throw err;
+    }
+
+    type ParsedSection = Record<string, unknown>;
+
+    const hook           = (parsed.hook          as ParsedSection | undefined) ?? {};
+    const productIntro   = (parsed.productIntro   as ParsedSection | undefined) ?? {};
+    const simulatedDemo  = (parsed.simulatedDemo  as ParsedSection | undefined) ?? {};
+    const imageShowcase  = (parsed.imageShowcase  as ParsedSection | undefined) ?? {};
+    const featureCallouts = (parsed.featureCallouts as ParsedSection | undefined) ?? {};
+    const socialProofCta = (parsed.socialProofCta as ParsedSection | undefined) ?? {};
+
+    const videoData: ProductVideoData = {
+      productSlug: slug,
+      brandColors: {
+        primary:    colors.primary,
+        secondary:  colors.secondary,
+        accent:     colors.accent,
+        background: "#0a0a0a",
+        text:       "#ffffff",
+      },
+      hook: {
+        painPointQuestion: (hook.painPointQuestion as string | undefined) || bestHook,
+      },
+      productIntro: {
+        productName: (productIntro.productName as string | undefined) || row.topic,
+        tagline:     (productIntro.tagline     as string | undefined) || row.topic,
+      },
+      simulatedDemo: {
+        inputPlaceholder: (simulatedDemo.inputPlaceholder as string | undefined) || "Search anything...",
+        typedText:        (simulatedDemo.typedText        as string | undefined) || row.topic,
+        buttonText:       (simulatedDemo.buttonText       as string | undefined) || "Learn More",
+        resultText:       (simulatedDemo.resultText       as string | undefined) || row.topic,
+        resultSubtext:    (simulatedDemo.resultSubtext    as string | undefined) || row.style,
+      },
+      imageShowcase: {
+        images: (Array.isArray((imageShowcase.images))
+          ? (imageShowcase.images as Array<{ path: string; headline: string }>)
+          : backgroundPaths.photos.slice(0, 3).map((p, i) => ({ path: p, headline: `Key point ${i + 1}` }))
+        ),
+      },
+      featureCallouts: {
+        productImagePath: (featureCallouts.productImagePath as string | undefined) || p0,
+        featureTitle: (featureCallouts.featureTitle as string | undefined) || undefined,
+        features: (Array.isArray(featureCallouts.features)
+          ? (featureCallouts.features as Array<{ icon: "check" | "lightning" | "star" | "shield" | "zap" | "heart"; text: string }>)
+          : []
+        ),
+      },
+      socialProofCta: {
+        socialProofNumber: typeof socialProofCta.socialProofNumber === "number"
+          ? socialProofCta.socialProofNumber
+          : undefined,
+        socialProofLabel: (socialProofCta.socialProofLabel as string | undefined) || "people learned this",
+        ctaUrl: (socialProofCta.ctaUrl as string | undefined) || "Follow for daily insights",
+      },
+      backgrounds: (backgroundPaths.photos.length > 0 || backgroundPaths.videos.length > 0)
+        ? backgroundPaths
+        : undefined,
+    };
 
     return videoData;
   }
 
-  // === Ollama Structured Completion ===
+  private fallbackVideoData(
+    row: ContentRow,
+    slug: string,
+    backgroundPaths: { photos: string[]; videos: string[] }
+  ): ProductVideoData {
+    const styleKey = row.style.toLowerCase();
+    const colors   = STYLE_COLORS[styleKey] || STYLE_COLORS.default;
+    const bestHook = row.hookA || row.hookB || row.hookC || row.topic;
+    const photos   = backgroundPaths.photos;
 
-  private async ollamaStructuredCompletion<T>(
-    prompt: string,
-    schema: z.ZodType<T>
-  ): Promise<T> {
-    if (!this.config.ollama) {
-      throw new Error("Ollama not configured — set OLLAMA_URL in .env");
-    }
-    const ollamaConfig = this.config.ollama;
-    const jsonSchema = zodToJsonSchema(schema, { target: "openApi3" }) as any;
+    // Split script on ". " (period+space) — NOT bare "." to avoid splitting decimals
+    const scriptLines = row.script
+      ? row.script.split(/\.\s+/).filter(Boolean).slice(0, 4)
+      : [];
 
-    const systemPrompt = `You are an AI assistant that ONLY responds with valid JSON.
-Your response must strictly match this JSON schema:
-${JSON.stringify(jsonSchema, null, 2)}
+    const w5 = (s: string) => s.trim().split(/\s+/).slice(0, 5).join(" ");
+    const benefit1 = scriptLines[0] ? w5(scriptLines[0]) : `What is ${row.topic}`;
+    const benefit2 = scriptLines[1] ? w5(scriptLines[1]) : "Why it matters";
+    const benefit3 = scriptLines[2] ? w5(scriptLines[2]) : "How to apply it";
+    const benefit4 = scriptLines[3] ? w5(scriptLines[3]) : "Real-world results";
 
-IMPORTANT: Output ONLY the JSON object. No markdown, no code fences, no explanation.`;
+    return {
+      productSlug:  slug,
+      brandColors:  { primary: colors.primary, secondary: colors.secondary, accent: colors.accent, background: "#0a0a0a", text: "#ffffff" },
+      hook:         { painPointQuestion: bestHook },
+      productIntro: { productName: row.topic, tagline: row.hookB || row.hookA || row.topic },
+      simulatedDemo: {
+        inputPlaceholder: "Search anything...",
+        typedText:        row.topic.slice(0, 35),
+        buttonText:       "Learn More",
+        resultText:       benefit1,
+        resultSubtext:    row.style,
+      },
+      imageShowcase: {
+        images: [
+          { path: photos[0] || "", headline: benefit1.split(" ").slice(0, 4).join(" ") },
+          { path: photos[1] || photos[0] || "", headline: benefit2.split(" ").slice(0, 4).join(" ") },
+          { path: photos[2] || photos[0] || "", headline: benefit3.split(" ").slice(0, 4).join(" ") },
+        ],
+      },
+      featureCallouts: {
+        productImagePath: photos[0] || "",
+        featureTitle: `${row.topic.split(" ").slice(0, 3).join(" ")} — Key Points`,
+        features: [
+          { icon: "check",     text: benefit1 },
+          { icon: "lightning", text: benefit2 },
+          { icon: "star",      text: benefit3 },
+          { icon: "shield",    text: benefit4 },
+        ],
+      },
+      socialProofCta: {
+        socialProofNumber: undefined,
+        socialProofLabel:  "follow for more",
+        ctaUrl:            "Follow for daily insights",
+      },
+      backgrounds: photos.length > 0 || backgroundPaths.videos.length > 0 ? backgroundPaths : undefined,
+    };
+  }
 
-    const response = await fetch(
-      `${ollamaConfig.url}/api/chat`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: ollamaConfig.model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: prompt },
-          ],
-          format: "json",
-          stream: false,
-          options: {
-            temperature: 0.7,
-            num_predict: 4096,
-          },
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(`Ollama API error: ${await response.text()}`);
-    }
-
-    const data = await response.json();
-    const content = data.message?.content;
-
-    if (!content) {
-      throw new Error("No content in Ollama response");
-    }
-
-    const parsed = JSON.parse(content);
-    return schema.parse(parsed);
+  async generateAndSave(
+    row: ContentRow,
+    slug: string,
+    backgroundPaths: { photos: string[]; videos: string[] },
+    outputDir: string
+  ): Promise<ProductVideoData> {
+    const videoData = await this.generateFromContent(row, slug, backgroundPaths);
+    fs.mkdirSync(outputDir, { recursive: true });
+    fs.writeFileSync(path.join(outputDir, "video-data.json"), JSON.stringify(videoData, null, 2));
+    return videoData;
   }
 }
 
-// Re-export types for convenience
-export type { ProductVideoData } from "../../remotion/types";
+export type { ProductVideoData };

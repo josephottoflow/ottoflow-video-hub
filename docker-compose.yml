@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ottoflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ottoflow
+      POSTGRES_USER: ottoflow
+      POSTGRES_PASSWORD: ottoflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ottoflow -d ottoflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ottoflow-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory-policy noeviction
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:

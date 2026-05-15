@@ -45,12 +45,12 @@ function lerp(a: number, b: number, t: number): number {
 
 /** Theme → headline font mapping */
 const THEME_HEADLINE_FONTS: Record<ThemePreset, FontFamily> = {
-  tech: "Inter",
+  tech: "Space Grotesk",
   luxury: "Montserrat",
   outdoor: "Montserrat",
-  minimal: "Inter",
-  bold: "Poppins",
-  neon: "Poppins",
+  minimal: "Space Grotesk",
+  bold: "Space Grotesk",
+  neon: "Space Grotesk",
 };
 
 /** Theme → body font mapping */
@@ -166,18 +166,18 @@ export function ensureContrast(bgColor: string, preferredColor: string = "#FFFFF
 /** Role-based typography defaults */
 const ROLE_TYPOGRAPHY: Record<TextRole, Omit<TextStyleConfig, "color" | "textShadow" | "gradient">> = {
   hook: {
-    fontFamily: "Inter",
-    fontWeight: 900,
-    fontSize: 72,
-    letterSpacing: "-0.03em",
-    lineHeight: 1.05,
+    fontFamily: "Bebas Neue",
+    fontWeight: 400,
+    fontSize: 110,
+    letterSpacing: "0.04em",
+    lineHeight: 1.0,
     opacity: 1.0,
     textTransform: "uppercase",
   },
   headline: {
     fontFamily: "Inter",
     fontWeight: 800,
-    fontSize: 52,
+    fontSize: 72,
     letterSpacing: "-0.02em",
     lineHeight: 1.1,
     opacity: 1.0,
@@ -185,8 +185,8 @@ const ROLE_TYPOGRAPHY: Record<TextRole, Omit<TextStyleConfig, "color" | "textSha
   },
   subheadline: {
     fontFamily: "Inter",
-    fontWeight: 400,
-    fontSize: 24,
+    fontWeight: 600,
+    fontSize: 38,
     letterSpacing: "-0.01em",
     lineHeight: 1.3,
     opacity: 0.85,
@@ -194,8 +194,8 @@ const ROLE_TYPOGRAPHY: Record<TextRole, Omit<TextStyleConfig, "color" | "textSha
   },
   body: {
     fontFamily: "Inter",
-    fontWeight: 400,
-    fontSize: 20,
+    fontWeight: 600,
+    fontSize: 36,
     letterSpacing: "0em",
     lineHeight: 1.4,
     opacity: 0.8,
@@ -204,7 +204,7 @@ const ROLE_TYPOGRAPHY: Record<TextRole, Omit<TextStyleConfig, "color" | "textSha
   cta: {
     fontFamily: "Inter",
     fontWeight: 600,
-    fontSize: 30,
+    fontSize: 40,
     letterSpacing: "0.04em",
     lineHeight: 1.0,
     opacity: 1.0,
@@ -212,8 +212,8 @@ const ROLE_TYPOGRAPHY: Record<TextRole, Omit<TextStyleConfig, "color" | "textSha
   },
   bullet: {
     fontFamily: "Inter",
-    fontWeight: 500,
-    fontSize: 22,
+    fontWeight: 700,
+    fontSize: 36,
     letterSpacing: "0em",
     lineHeight: 1.3,
     opacity: 0.9,
@@ -222,7 +222,7 @@ const ROLE_TYPOGRAPHY: Record<TextRole, Omit<TextStyleConfig, "color" | "textSha
   label: {
     fontFamily: "Inter",
     fontWeight: 500,
-    fontSize: 16,
+    fontSize: 26,
     letterSpacing: "0.06em",
     lineHeight: 1.2,
     opacity: 0.6,
@@ -235,7 +235,7 @@ const ROLE_TYPOGRAPHY: Record<TextRole, Omit<TextStyleConfig, "color" | "textSha
  */
 function glowShadow(color: string, intensity: number = 0.5): string {
   const hex = Math.round(intensity * 40).toString(16).padStart(2, "0");
-  return `0 4px 20px rgba(0,0,0,0.5), 0 0 60px ${color}${hex}, 0 0 120px ${color}${Math.round(intensity * 20).toString(16).padStart(2, "0")}`;
+  return `0 4px 24px rgba(0,0,0,0.9), 0 2px 6px rgba(0,0,0,1), 0 0 60px ${color}${hex}, 0 0 120px ${color}${Math.round(intensity * 20).toString(16).padStart(2, "0")}`;
 }
 
 /**
@@ -294,12 +294,12 @@ const SCENE_TEXT_ANIMS: Record<SceneType, {
   subheadline: TextAnimation;
   cta: TextAnimation;
 }> = {
-  hook: { headline: "punchScale", subheadline: "fadeIn", cta: "none" },
-  problem: { headline: "fadeSlideUp", subheadline: "fadeIn", cta: "none" },
-  hero: { headline: "fadeSlideUp", subheadline: "fadeSlideUp", cta: "none" },
+  hook: { headline: "glitch", subheadline: "maskReveal", cta: "none" },
+  problem: { headline: "maskReveal", subheadline: "fadeIn", cta: "none" },
+  hero: { headline: "cascade", subheadline: "fadeSlideUp", cta: "none" },
   features: { headline: "fadeSlideUp", subheadline: "fadeIn", cta: "none" },
-  proof: { headline: "fadeSlideUp", subheadline: "fadeIn", cta: "none" },
-  cta: { headline: "fadeSlideUp", subheadline: "fadeIn", cta: "popIn" },
+  proof: { headline: "cascade", subheadline: "fadeIn", cta: "none" },
+  cta: { headline: "maskReveal", subheadline: "fadeIn", cta: "popIn" },
 };
 
 /**
@@ -318,11 +318,14 @@ export function getTextAnim(
 
   const ANIM_DEFAULTS: Record<TextAnimation, Omit<TextAnimConfig, "animation" | "delay">> = {
     fadeSlideUp: { damping: 12, stiffness: 160, slideDistance: 30, scaleFrom: 1, scaleTo: 1 },
-    punchScale: { damping: 8, stiffness: 280, slideDistance: 0, scaleFrom: 0.3, scaleTo: 1.0 },
-    glowPulse: { damping: 14, stiffness: 140, slideDistance: 0, scaleFrom: 0.95, scaleTo: 1.0 },
-    popIn: { damping: 10, stiffness: 200, slideDistance: 0, scaleFrom: 0.5, scaleTo: 1.0 },
-    fadeIn: { damping: 16, stiffness: 120, slideDistance: 0, scaleFrom: 1, scaleTo: 1 },
-    none: { damping: 12, stiffness: 160, slideDistance: 0, scaleFrom: 1, scaleTo: 1 },
+    punchScale:  { damping: 8,  stiffness: 280, slideDistance: 0,  scaleFrom: 0.3, scaleTo: 1.0 },
+    glowPulse:   { damping: 14, stiffness: 140, slideDistance: 0,  scaleFrom: 0.95, scaleTo: 1.0 },
+    popIn:       { damping: 10, stiffness: 200, slideDistance: 0,  scaleFrom: 0.5, scaleTo: 1.0 },
+    fadeIn:      { damping: 16, stiffness: 120, slideDistance: 0,  scaleFrom: 1, scaleTo: 1 },
+    maskReveal:  { damping: 14, stiffness: 200, slideDistance: 40, scaleFrom: 1, scaleTo: 1 },
+    glitch:      { damping: 6,  stiffness: 400, slideDistance: 0,  scaleFrom: 0.9, scaleTo: 1.0 },
+    cascade:     { damping: 10, stiffness: 240, slideDistance: 0,  scaleFrom: 0.7, scaleTo: 1.0 },
+    none:        { damping: 12, stiffness: 160, slideDistance: 0,  scaleFrom: 1, scaleTo: 1 },
   };
 
   const base = ANIM_DEFAULTS[animation];
@@ -377,12 +380,6 @@ export function generateSceneTextConfig(
       paddingX: 60,
       offsetY: 0,
       textAlign: "center",
-      maxWidth: 960,
-    },
-    colors: palette,
-  };
-}
-extAlign: "center",
       maxWidth: 960,
     },
     colors: palette,

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-TikTok Product Video Factory — One-Click Runner
-=================================================
+Ottoflow Video Hub — One-Click Runner
+======================================
 Double-click this file or run: python run.py
 
 What it does:
@@ -31,7 +31,7 @@ NODE_MODULES = os.path.join(PROJECT_DIR, "node_modules")
 def print_header():
     print()
     print("=" * 55)
-    print("  TikTok Product Video Factory")
+    print("  Ottoflow Video Hub")
     print("  One-Click Pipeline Runner")
     print("=" * 55)
     print()

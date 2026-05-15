@@ -98,6 +98,39 @@ export const TextBlock: React.FC<TextBlockProps> = ({ text, style, anim }) => {
     opacity = progress;
   }
 
+  if (anim.animation === "maskReveal") {
+    const progress = spring({
+      frame: animFrame,
+      fps,
+      config: { damping: anim.damping, stiffness: anim.stiffness },
+    });
+    opacity = 1;
+    translateY = (1 - progress) * anim.slideDistance;
+    scale = 1;
+  }
+
+  if (anim.animation === "glitch") {
+    const progress = spring({
+      frame: animFrame,
+      fps,
+      config: { damping: anim.damping, stiffness: anim.stiffness, mass: 0.4 },
+    });
+    opacity = Math.min(1, progress * 1.5);
+    scale = interpolate(progress, [0, 1], [anim.scaleFrom, anim.scaleTo]);
+    translateY = 0;
+  }
+
+  if (anim.animation === "cascade") {
+    const progress = spring({
+      frame: animFrame,
+      fps,
+      config: { damping: anim.damping, stiffness: anim.stiffness, mass: 0.55 },
+    });
+    opacity = Math.min(1, progress * 1.4);
+    scale = interpolate(progress, [0, 1], [anim.scaleFrom, anim.scaleTo]);
+    translateY = (1 - progress) * -30;
+  }
+
   if (anim.animation === "none") {
     opacity = 1;
     scale = 1;

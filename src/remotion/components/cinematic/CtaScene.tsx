@@ -51,21 +51,23 @@ export const CtaScene: React.FC<CtaSceneProps> = ({
 
   // CTA button
   const ctaEntry = spring({ frame: frame - 25, fps, config: { damping: 12, stiffness: 150 } });
-  const ctaPulse = interpolate(frame % 40, [0, 20, 40], [1, 1.04, 1], { extrapolateRight: "clamp" });
+  const ctaPulse = interpolate(frame % 60, [0, 30, 60], [1, 1.05, 1], { extrapolateRight: "clamp" });
 
-  // Shine sweep on CTA
-  const shine = interpolate(frame, [35, 70], [-200, 600], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  // Shine sweep — repeats every 90 frames so it stays lively for 6s
+  const shineFrame = frame % 90;
+  const shine = interpolate(shineFrame, [30, 65], [-200, 600], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
 
   // Headline
   const headS = spring({ frame: frame - 10, fps, config: { damping: 12, stiffness: 160 } });
 
-  // Radial glow explosion behind product
+  // Radial glow — expands then settles
   const glowExpand = interpolate(frame, [0, 40], [100, 700], { extrapolateRight: "clamp" });
   const glowOpacity = interpolate(frame, [0, 20, 40], [0, 0.15, 0.08], { extrapolateRight: "clamp" });
 
-  // Urgency ring
-  const ringScale = interpolate(frame, [15, 50], [0.5, 1.3], { extrapolateRight: "clamp" });
-  const ringOpacity = interpolate(frame, [15, 35, 50], [0.4, 0.2, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  // Urgency ring — fires once on entry, then repeats every 80 frames
+  const ringFrame = frame % 80;
+  const ringScale = interpolate(ringFrame, [0, 50], [0.5, 1.5], { extrapolateRight: "clamp" });
+  const ringOpacity = interpolate(ringFrame, [0, 25, 50], [0.35, 0.15, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
 
   return (
     <AbsoluteFill style={{ opacity }}>
@@ -97,31 +99,33 @@ export const CtaScene: React.FC<CtaSceneProps> = ({
         opacity: ringOpacity,
       }} />
 
-      {/* Product image */}
-      <AbsoluteFill style={{ justifyContent: "center", alignItems: "center", paddingBottom: 350 }}>
-        <Img
-          src={resolveImage(src)}
-          style={{
-            maxWidth: 550,
-            maxHeight: 700,
-            objectFit: "contain",
-            transform: `translateY(${floatY}px) scale(${entry * scale})`,
-            filter: `drop-shadow(${depthShadowCSS(lighting)}) brightness(1.05)`,
-          }}
-        />
-      </AbsoluteFill>
+      {/* Product image — only when a real src is provided */}
+      {src && src.trim().length > 0 && (
+        <AbsoluteFill style={{ justifyContent: "center", alignItems: "center", paddingBottom: 350 }}>
+          <Img
+            src={resolveImage(src)}
+            style={{
+              maxWidth: 550,
+              maxHeight: 700,
+              objectFit: "contain",
+              transform: `translateY(${floatY}px) scale(${entry * scale})`,
+              filter: `drop-shadow(${depthShadowCSS(lighting)}) brightness(1.05)`,
+            }}
+          />
+        </AbsoluteFill>
+      )}
 
       {/* Headline */}
       <div style={{
         position: "absolute",
-        bottom: 350,
+        ...(src && src.trim().length > 0 ? { bottom: 350 } : { top: "50%", transform: "translateY(-80px)" }),
         left: 0,
         right: 0,
         textAlign: "center",
         padding: `0 ${textConfig?.layout.paddingX ?? 60}px`,
       }}>
         <div style={{
-          fontSize: textConfig?.headline.fontSize ?? 48,
+          fontSize: textConfig?.headline.fontSize ?? 76,
           fontWeight: textConfig?.headline.fontWeight ?? 800,
           color: textConfig?.colors.primary ?? "#ffffff",
           fontFamily: `'${textConfig?.headline.fontFamily ?? "Inter"}', sans-serif`,
@@ -157,7 +161,7 @@ export const CtaScene: React.FC<CtaSceneProps> = ({
             padding: "20px 56px",
             borderRadius: 50,
             background: `linear-gradient(135deg, ${theme.color}, ${theme.rimWarm})`,
-            fontSize: textConfig?.cta.fontSize ?? 30,
+            fontSize: textConfig?.cta.fontSize ?? 44,
             fontWeight: textConfig?.cta.fontWeight ?? 700,
             color: textConfig?.colors.contrast ?? "#ffffff",
             fontFamily: `'${textConfig?.cta.fontFamily ?? "Inter"}', sans-serif`,
@@ -189,7 +193,7 @@ export const CtaScene: React.FC<CtaSceneProps> = ({
         bottom: 180,
         left: "50%",
         transform: "translateX(-50%)",
-        width: interpolate(frame, [50, 80], [0, 200], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }),
+        width: interpolate(frame, [40, 70], [0, 200], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }),
         height: 3,
         borderRadius: 2,
         background: `linear-gradient(90deg, transparent, ${theme.color}, transparent)`,

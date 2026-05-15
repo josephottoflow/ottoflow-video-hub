@@ -107,4 +107,3 @@ function opHex(opacity: number): string {
     .toString(16)
     .padStart(2, "0");
 }
-}

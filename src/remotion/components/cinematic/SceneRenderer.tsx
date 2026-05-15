@@ -42,24 +42,39 @@ interface SceneRendererProps {
 export const SceneRenderer: React.FC<SceneRendererProps> = ({ props }) => {
   const {
     images, headline, subheadline, problemText, bulletPoints,
-    cta, price, theme, colorHint, socialProof, backgroundImages, ctaStyle,
+    cta, price, theme, colorHint, socialProof, backgroundImages, featureTitle, ctaStyle,
   } = props;
 
-  // 1. Image Selection: pick best 6 from all available
+  // 1. Image Selection: pick best 6 from all available.
+  // Educational content has no product images — empty array is valid.
   const selectedImages = images.length > 6 ? selectBestImagePaths(images, 6) : images;
 
   // 2. Theme + Classification + Scene Assignment
   const themeConfig = resolveTheme(theme, colorHint);
-  const scenes = assignImagesToScenes(selectedImages);
+
+  // Educational/explainer content may have zero product images — guard assignImagesToScenes
+  // which expects at least one image. Use empty-string placeholders when none exist.
+  const EMPTY_SCENE = { src: "", category: "hero" as const, index: 0, confidence: 0 };
+  const scenes = selectedImages.length > 0
+    ? assignImagesToScenes(selectedImages)
+    : { hook: EMPTY_SCENE, hero: EMPTY_SCENE, features: [EMPTY_SCENE], proof: [EMPTY_SCENE], cta: EMPTY_SCENE };
 
   // 2b. Background images — distribute across 6 scenes
   const bgImages = backgroundImages || [];
-  const hookBg = bgImages[0];
-  const problemBg = bgImages[1] || bgImages[0];
-  const heroBg = bgImages[2] || bgImages[1];
-  const featuresBg = bgImages[3] || bgImages[2];
-  const proofBg = bgImages[4] || bgImages[0];
-  const ctaBg = bgImages[5] || bgImages[1] || bgImages[0];
+  // Prefer MP4/WebM video backgrounds; fall back to photos only if no videos exist
+  const videoBgs = bgImages.filter(src => {
+    const l = src.toLowerCase();
+    return l.endsWith('.mp4') || l.endsWith('.webm') || l.endsWith('.mov');
+  });
+  // Always prefer videos; cycle them across all 6 scenes even if < 6
+  const pool = videoBgs.length > 0 ? videoBgs : bgImages;
+  const cyc  = (i: number) => pool.length > 0 ? pool[i % pool.length] : undefined;
+  const hookBg     = cyc(0);
+  const problemBg  = cyc(1);
+  const heroBg     = cyc(2);
+  const featuresBg = cyc(3);
+  const proofBg    = cyc(4);
+  const ctaBg      = cyc(5);
 
   // 3. Deterministic seed
   const seed = selectedImages[0] || "default";
@@ -107,7 +122,7 @@ export const SceneRenderer: React.FC<SceneRendererProps> = ({ props }) => {
 
       {/* ── Scene 1: HOOK (2s) — Bold grab, fast scale ── */}
       <Sequence from={offset} durationInFrames={CIN_SCENE_FRAMES.hook}>
-        <CinematicBackground src={hookBg} theme={themeConfig} overlay={0.15} panDirection="right" />
+        <CinematicBackground src={hookBg} theme={themeConfig} overlay={0.60} panDirection="right" />
         <Camera config={cameraConfigs.hook}>
           <ParallaxLayer theme={themeConfig} variant={hookVariant} seed={seed + "hook"}>
             <Angle
@@ -127,7 +142,7 @@ export const SceneRenderer: React.FC<SceneRendererProps> = ({ props }) => {
 
       {/* ── Scene 2: PROBLEM (3s) — Pain point text ── */}
       <Sequence from={offset} durationInFrames={CIN_SCENE_FRAMES.problem}>
-        <CinematicBackground src={problemBg} theme={themeConfig} overlay={0.25} panDirection="none" />
+        <CinematicBackground src={problemBg} theme={themeConfig} overlay={0.65} panDirection="none" />
         <Camera config={cameraConfigs.problem}>
           <Problem
             text={resolvedProblemText}
@@ -144,7 +159,7 @@ export const SceneRenderer: React.FC<SceneRendererProps> = ({ props }) => {
 
       {/* ── Scene 3: HERO (5s) — Main product showcase ── */}
       <Sequence from={offset} durationInFrames={CIN_SCENE_FRAMES.hero}>
-        <CinematicBackground src={heroBg} theme={themeConfig} overlay={0.15} panDirection="left" />
+        <CinematicBackground src={heroBg} theme={themeConfig} overlay={0.60} panDirection="left" />
         <Camera config={cameraConfigs.hero}>
           <ParallaxLayer theme={themeConfig} variant={heroVariant} seed={seed + "hero"}>
             <Hero
@@ -164,12 +179,13 @@ export const SceneRenderer: React.FC<SceneRendererProps> = ({ props }) => {
 
       {/* ── Scene 4: FEATURES (10s) — Fast image carousel ── */}
       <Sequence from={offset} durationInFrames={CIN_SCENE_FRAMES.features}>
-        <CinematicBackground src={featuresBg} theme={themeConfig} overlay={0.18} panDirection="right" />
+        <CinematicBackground src={featuresBg} theme={themeConfig} overlay={0.62} panDirection="right" />
         <Camera config={cameraConfigs.features}>
           <ParallaxLayer theme={themeConfig} variant={detailVariant} seed={seed + "features"}>
             <Detail
               images={scenes.features.map((f) => ({ src: f.src }))}
               bulletPoints={bulletPoints}
+              featureTitle={featureTitle}
               variant={detailVariant}
               lighting={featuresLighting}
               theme={themeConfig}
@@ -183,7 +199,7 @@ export const SceneRenderer: React.FC<SceneRendererProps> = ({ props }) => {
 
       {/* ── Scene 5: PROOF (5s) — Social proof + lifestyle ── */}
       <Sequence from={offset} durationInFrames={CIN_SCENE_FRAMES.proof}>
-        <CinematicBackground src={proofBg} theme={themeConfig} overlay={0.15} panDirection="left" />
+        <CinematicBackground src={proofBg} theme={themeConfig} overlay={0.60} panDirection="left" />
         <Camera config={cameraConfigs.proof}>
           <ParallaxLayer theme={themeConfig} variant={lifestyleVariant} seed={seed + "proof"}>
             <Lifestyle
@@ -203,7 +219,7 @@ export const SceneRenderer: React.FC<SceneRendererProps> = ({ props }) => {
 
       {/* ── Scene 6: CTA (3s) — TikTok Yellow Basket ── */}
       <Sequence from={offset} durationInFrames={CIN_SCENE_FRAMES.cta}>
-        <CinematicBackground src={ctaBg} theme={themeConfig} overlay={0.2} zoom={1.12} panDirection="none" />
+        <CinematicBackground src={ctaBg} theme={themeConfig} overlay={0.65} zoom={1.12} panDirection="none" />
         <Camera config={cameraConfigs.cta}>
           <ParallaxLayer theme={themeConfig} variant={ctaVariant} seed={seed + "cta"}>
             <CtaScene
@@ -218,41 +234,6 @@ export const SceneRenderer: React.FC<SceneRendererProps> = ({ props }) => {
               ctaStyle={ctaStyle || "tiktok-basket"}
             />
           </ParallaxLayer>
-        </Camera>
-      </Sequence>
-    </AbsoluteFill>
-  );
-};
-lProofNumber={socialProof?.number}
-              socialProofText={socialProof?.label}
-              variant={lifestyleVariant}
-              lighting={proofLighting}
-              theme={themeConfig}
-              textConfig={proofText}
-            />
-          </ParallaxLayer>
-        </Camera>
-        <Transition config={transitionConfigs.proof} accentColor={themeConfig.color} />
-      </Sequence>
-      {(offset += CIN_SCENE_FRAMES.proof) && null}
-
-      {/* ── Scene 6: CTA (3s) — TikTok Yellow Basket ── */}
-      <Sequence from={offset} durationInFrames={CIN_SCENE_FRAMES.cta}>
-        <CinematicBackground src={ctaBg} theme={themeConfig} overlay={0.2} zoom={1.12} panDirection="none" />
-        <Camera config={cameraConfigs.cta}>
-          <ParallaxLayer theme={themeConfig} variant={ctaVariant} seed={seed + "cta"}>
-            <CtaScene
-              src={scenes.cta.src}
-              headline={headline}
-              ctaText={cta}
-              variant={ctaVariant}
-              lighting={ctaLighting}
-              theme={themeConfig}
-              textConfig={ctaText}
-              price={price}
-              ctaStyle={ctaStyle || "tiktok-basket"}
-            />
-          </ParallexLayer>
         </Camera>
       </Sequence>
     </AbsoluteFill>

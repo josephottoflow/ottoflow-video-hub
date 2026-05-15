@@ -8,8 +8,14 @@ output/
 *.mov
 .env
 .env.local
+client_secret.json
+.oauth-token.json
 *.log
 tsconfig.tsbuildinfo
 .DS_Store
 Thumbs.db
 push-to-github.bat
+outputs/
+public/content/*/
+.mcp.json
+.claude/

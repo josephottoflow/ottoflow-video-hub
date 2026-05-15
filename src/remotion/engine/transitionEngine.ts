@@ -129,10 +129,4 @@ export function logTransitionConfigs(configs: Record<SceneType, TransitionConfig
     }
   }
 }
-`intensity ${config.intensity.toFixed(2)}`
-      );
-    }
-  }
-}
-}
 

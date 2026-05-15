@@ -1,297 +1,426 @@
 /**
- * PIPELINE ORCHESTRATOR — Master Controller (No-AI Mode)
+ * PIPELINE ORCHESTRATOR — Ottoflow Video Hub
+ * Text + Pexels driven. No image folders required.
+ * Reads content rows from Google Sheets, fetches Pexels backgrounds,
+ * renders video, sends for Telegram approval, exports per platform.
  */
 
-import { SheetsClient, ProductRow } from "../sheets/client";
-import { ImageProcessor } from "../ingestion/image-processor";
+import { SheetsClient, ContentRow } from "../sheets/client";
 import { RenderAgent } from "../render/render-agent";
 import { TelegramApprovalBot } from "../approval/telegram-bot";
-import { Exporter } from "../export/exporter";
+import { PexelsClient } from "../pexels/pexels-client";
+import { PromptEngine } from "../prompt-engine/product-prompts";
+import { SeoGenerator } from "../seo/seo-generator";
+import { DesignAgent } from "../design/design-agent";
+import { ScriptWriterAgent } from "../scriptwriter/scriptwriter-agent";
+import { sanitizeScript } from "../scriptwriter/scriptwriter-agent";
+import { StoryboardAgent } from "../storyboard/storyboard-agent";
+import { FFmpegAgent } from "../ffmpeg/ffmpeg-agent";
+import { BrandingAgent } from "../branding/branding-agent";
+import { MusicAgent } from "../music/music-agent";
+import { VoiceoverAgent } from "../voiceover/voiceover-agent";
 import { getConfig } from "../config/config";
+import { setStatus } from "../../lib/pipeline-store";
+import { uploadVideoToDrive } from "../../lib/google-drive";
+import { slugify } from "../../lib/slug-utils";
 import * as path from "path";
 import * as fs from "fs";
 import type { ProductVideoData } from "../../remotion/types";
 
 export interface PipelineResult {
-  productName: string;
-  productSlug: string;
-  success: boolean;
-  videoUrl?: string;
-  outputDir?: string;
-  error?: string;
+  topic:         string;
+  slug:          string;
+  success:       boolean;
+  outputLink?:   string;
+  outputDir?:    string;
+  error?:        string;
   timing: {
-    startedAt: string;
+    startedAt:   string;
     completedAt: string;
-    durationMs: number;
+    durationMs:  number;
   };
 }
 
 export class PipelineOrchestrator {
-  private sheets: SheetsClient;
-  private imageProcessor: ImageProcessor;
-  private renderAgent: RenderAgent;
-  private approvalBot: TelegramApprovalBot;
-  private exporter: Exporter;
-  private config = getConfig();
+  private sheets         = new SheetsClient();
+  private renderAgent    = new RenderAgent();
+  private approvalBot    = new TelegramApprovalBot();
+  private promptEngine   = new PromptEngine();
+  private seoGenerator   = new SeoGenerator();
+  private designAgent    = new DesignAgent();
+  private scriptWriter   = new ScriptWriterAgent();
+  private storyboard     = new StoryboardAgent();
+  private ffmpeg         = new FFmpegAgent();
+  private branding       = new BrandingAgent();
+  private music          = new MusicAgent();
+  private voiceover      = new VoiceoverAgent();
+  private config         = getConfig();
 
-  constructor() {
-    this.sheets = new SheetsClient();
-    this.imageProcessor = new ImageProcessor();
-    this.renderAgent = new RenderAgent();
-    this.approvalBot = new TelegramApprovalBot();
-    this.exporter = new Exporter();
+  async processSingleByRowIndex(rowIndex: number, templateOverride?: string): Promise<PipelineResult> {
+    await this.sheets.initializeSheet();
+    const all = await this.sheets.getAllContent();
+    const row = all.find((r) => r.rowIndex === rowIndex);
+    if (!row) throw new Error(`Row ${rowIndex} not found in sheet`);
+
+    // Fill missing script before rendering
+    if (!row.script || row.script.trim().length < 10) {
+      const generated = await this.scriptWriter.fillMissingScripts([row]);
+      const gen = generated.get(rowIndex);
+      if (gen) {
+        row.script = gen.script;
+        if (!row.hookA) row.hookA = gen.hookA;
+        if (!row.hookB) row.hookB = gen.hookB;
+        if (!row.hookC) row.hookC = gen.hookC;
+        await this.sheets.updateScript(rowIndex, row.script, row.hookA, row.hookB, row.hookC);
+      }
+    }
+
+    return this.processContent(row, templateOverride);
   }
 
   async processAll(): Promise<PipelineResult[]> {
     await this.sheets.initializeSheet();
-    const pending = await this.sheets.getPendingProducts();
+    const pending = await this.sheets.getPendingContent();
 
     if (pending.length === 0) {
-      console.log("No pending products to process.");
+      console.log("No pending content to process.");
       return [];
     }
 
-    console.log(`Found ${pending.length} pending product(s). Starting pipeline...`);
+    console.log(`Found ${pending.length} pending item(s). Starting pipeline...`);
 
-    const results: PipelineResult[] = [];
-    for (const product of pending) {
-      const result = await this.processProduct(product);
-      results.push(result);
+    // Fill missing scripts before rendering
+    const missingScripts = pending.filter((r) => !r.script || r.script.trim().length < 10);
+    if (missingScripts.length > 0) {
+      console.log(`\nScript Writer: filling ${missingScripts.length} missing script(s)...`);
+      const generated = await this.scriptWriter.fillMissingScripts(pending);
+      for (const [rowIndex, gen] of generated) {
+        const row = pending.find((r) => r.rowIndex === rowIndex);
+        if (row) {
+          row.script = gen.script;
+          if (!row.hookA) row.hookA = gen.hookA;
+          if (!row.hookB) row.hookB = gen.hookB;
+          if (!row.hookC) row.hookC = gen.hookC;
+          await this.sheets.updateScript(rowIndex, row.script, row.hookA, row.hookB, row.hookC);
+        }
+      }
     }
 
-    const succeeded = results.filter((r) => r.success).length;
-    const failed = results.filter((r) => !r.success).length;
-    console.log(`\nPipeline complete: ${succeeded} succeeded, ${failed} failed.`);
+    // Pre-assign one unique random template per topic
+    const ALL_TEMPLATES = ["listicle", "stats-story", "tutorial", "myth-buster", "quote-card", "cinematic"];
+    const shuffled = [...ALL_TEMPLATES].sort(() => Math.random() - 0.5);
+    const templateMap = new Map(pending.map((row, i) => [row.rowIndex, shuffled[i % shuffled.length]]));
 
+    const results: PipelineResult[] = [];
+    for (let i = 0; i < pending.length; i++) {
+      const template = templateMap.get(pending[i].rowIndex)!;
+      results.push(await this.processContent(pending[i], template));
+      // Pause between items to stay within Google Sheets write quota (60 req/min)
+      if (i < pending.length - 1) await new Promise((r) => setTimeout(r, 2000));
+    }
+
+    const ok   = results.filter((r) => r.success).length;
+    const fail = results.filter((r) => !r.success).length;
+    console.log(`\nPipeline complete: ${ok} succeeded, ${fail} failed.`);
     return results;
   }
 
-  async processProduct(product: ProductRow): Promise<PipelineResult> {
+  async processContent(row: ContentRow, templateOverride?: string): Promise<PipelineResult> {
     const startedAt = new Date().toISOString();
     const startTime = Date.now();
-    const productSlug = this.slugify(
-      product.productName || `product-${product.rowIndex}`
-    );
+    const slug      = slugify(row.topic || `content-${row.rowIndex}`);
+
+    // tempDir declared early so voiceover + render can both use it
+    const tempDir = path.resolve(this.config.app.tempDir, slug);
+    fs.mkdirSync(tempDir, { recursive: true });
 
     try {
-      await this.sheets.updateStatus(product.rowIndex, "processing");
-      console.log(`[${productSlug}] Loading images from: ${product.imageFolder}`);
+      await this.sheets.updateStatus(row.rowIndex, "Processing");
+      setStatus("running", row.topic, 5);
+      console.log(`\n[${slug}] Starting...`);
 
-      const imageFolder = path.resolve(product.imageFolder);
-      if (!fs.existsSync(imageFolder)) {
-        throw new Error(`Image folder not found: ${imageFolder}`);
+      // Strip em-dashes and enforce human voice on pre-written scripts from the sheet
+      if (row.script) row.script = sanitizeScript(row.script);
+      if (row.hookA)  row.hookA  = sanitizeScript(row.hookA);
+      if (row.hookB)  row.hookB  = sanitizeScript(row.hookB);
+      if (row.hookC)  row.hookC  = sanitizeScript(row.hookC);
+
+      // ── 1. Generate visual design + apply Ottoflow brand ────
+      setStatus("running", row.topic, 10);
+      console.log(`[${slug}] Generating design spec...`);
+      const rawDesign = await this.designAgent.generateDesign(row);
+      const design    = this.branding.applyBrand(rawDesign);
+      console.log(`[${slug}] Design: ${design.theme} theme / ${design.mood} mood — ${design.rationale}`);
+
+      // ── 2. Generate storyboard (shot plan + visual consistency) ─
+      setStatus("running", row.topic, 20);
+      console.log(`[${slug}] Generating storyboard...`);
+      const storyboard = await this.storyboard.generate(row, design);
+      console.log(`[${slug}] Storyboard: ${storyboard.narrativeArc}`);
+
+      // ── 3. Select background music ───────────────────────────
+      setStatus("running", row.topic, 30);
+      console.log(`[${slug}] Selecting background music...`);
+      const musicTrack = await this.music.selectTrack(row, design, slug, tempDir);
+      if (musicTrack) {
+        console.log(`[${slug}] Music: "${musicTrack.name}" by ${musicTrack.artist} (${musicTrack.duration}s)`);
       }
 
-      const imageExtensions = [".jpg", ".jpeg", ".png", ".webp"];
-      const imageFiles = fs.readdirSync(imageFolder)
-        .filter((f) => imageExtensions.includes(path.extname(f).toLowerCase()))
-        .sort()
-        .map((f) => path.join(imageFolder, f));
-
-      if (imageFiles.length === 0) {
-        throw new Error(`No images found in: ${imageFolder}`);
+      // ── 4. Generate voiceover narration (ElevenLabs) ─────────────────
+      setStatus("running", row.topic, 35);
+      let voiceoverPath: string | undefined;
+      if (VoiceoverAgent.isAvailable() && row.script) {
+        console.log(`[${slug}] Generating voiceover narration...`);
+        voiceoverPath = await this.voiceover.generate(row.script, tempDir, row.voice) ?? undefined;
+        if (voiceoverPath) console.log(`[${slug}] Voiceover ready`);
       }
 
-      await this.sheets.updateImageCount(product.rowIndex, imageFiles.length);
-      console.log(`[${productSlug}] Found ${imageFiles.length} images.`);
+      // ── 5. Fetch Pexels backgrounds (guided by storyboard queries) ─
+      setStatus("running", row.topic, 40);
+      const pexelsQueries = this.storyboard.getPexelsQueries(storyboard);
+      const primaryQuery  = pexelsQueries[0] || row.topic;
+      const backgrounds   = await this.fetchBackgrounds(primaryQuery, row.style, slug, pexelsQueries);
+      console.log(`[${slug}] Backgrounds: ${backgrounds.photos.length} photos, ${backgrounds.videos.length} videos`);
 
-      const tempDir = path.resolve(this.config.app.tempDir, productSlug);
-      fs.mkdirSync(path.join(tempDir, "processed"), { recursive: true });
+      // ── 6. Build video data (storyboard + design tokens) ─────
+      setStatus("running", row.topic, 50);
+      console.log(`[${slug}] Generating video structure with Claude...`);
+      const storyboardContext = this.storyboard.toPromptContext(storyboard);
+      const videoData = await this.promptEngine.generateFromContent(row, slug, backgrounds, storyboardContext);
 
-      const processedImages = await Promise.all(
-        imageFiles.map(async (imgPath, i) => {
-          const destPath = path.join(tempDir, "processed", `frame-${String(i + 1).padStart(2, "0")}.png`);
-          fs.copyFileSync(imgPath, destPath);
-          return destPath;
-        })
+      // Override brand colors with Ottoflow brand (via Design Agent → BrandingAgent)
+      videoData.brandColors = {
+        primary:    design.brandColors.primary,
+        secondary:  design.brandColors.secondary,
+        accent:     design.brandColors.accent,
+        background: design.brandColors.background,
+        text:       design.brandColors.text,
+      };
+
+      // Apply on-brand CTA — overrides Claude's generic "Follow for daily insights"
+      videoData.socialProofCta.ctaUrl = this.branding.getCta(row.style);
+
+      // Save video data to public/ for Remotion
+      const contentDir = path.resolve("public", "content", slug);
+      fs.mkdirSync(contentDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(contentDir, "video-data.json"),
+        JSON.stringify(videoData, null, 2)
       );
 
-      // Copy images to public/ for Remotion's staticFile()
-      const publicImagesDir = path.resolve("public", "content", productSlug, "images");
-      fs.mkdirSync(publicImagesDir, { recursive: true });
-      for (const imgPath of processedImages) {
-        const destPath = path.join(publicImagesDir, path.basename(imgPath));
-        fs.copyFileSync(imgPath, destPath);
-      }
-      console.log(`[${productSlug}] Copied ${processedImages.length} images to public/`);
+      // ── 7. Render ────────────────────────────────────────────
+      setStatus("running", row.topic, 60);
+      await this.sheets.updateStatus(row.rowIndex, "Rendering");
+      const template = templateOverride ?? RenderAgent.selectTemplate(row.topic, row.style);
+      console.log(`[${slug}] Rendering video (template: ${template})...`);
 
-      console.log(`[${productSlug}] Building video data from your info...`);
-
-      const videoData = this.buildVideoData(
-        product,
-        productSlug,
-        processedImages
-      );
-
-      const videoDataPath = path.join(tempDir, "video-data.json");
-      fs.writeFileSync(videoDataPath, JSON.stringify(videoData, null, 2));
-
-      await this.sheets.updateStatus(product.rowIndex, "rendering");
-      console.log(`[${productSlug}] Rendering video (Remotion)...`);
-
-      const renderResult = await this.renderAgent.render(
-        productSlug,
-        videoData,
-        tempDir
-      );
-
+      const renderResult = await this.renderAgent.render(slug, videoData, tempDir, template);
       if (!renderResult.success) {
         throw new Error(`Render failed: ${renderResult.error}`);
       }
+      console.log(`[${slug}] Rendered in ${Math.round((renderResult.durationMs || 0) / 1000)}s`);
 
-      console.log(
-        `[${productSlug}] Rendered in ${Math.round((renderResult.durationMs || 0) / 1000)}s (${Math.round((renderResult.fileSizeBytes || 0) / 1024 / 1024)}MB)`
+      // ── 8. FFmpeg post-process: color grade + fade + music mix ─
+      setStatus("running", row.topic, 72);
+      let finalVideoPath = renderResult.videoPath!;
+      if (FFmpegAgent.isAvailable() && renderResult.videoPath) {
+        const audioLabel = voiceoverPath
+          ? `voiceover${musicTrack ? ` + music "${musicTrack.name}"` : ""}`
+          : musicTrack ? `music "${musicTrack.name}"` : "no audio";
+        console.log(`[${slug}] FFmpeg post-processing (${design.theme} grade, ${audioLabel})...`);
+        const ffResult = await this.ffmpeg.postProcess(renderResult.videoPath, design.theme, {
+          voiceoverPath: voiceoverPath,
+          musicPath:     musicTrack?.localPath,
+        });
+        if (ffResult.success) {
+          finalVideoPath = ffResult.outputPath;
+          console.log(`[${slug}] FFmpeg done — ${((ffResult.fileSizeBytes || 0) / 1024 / 1024).toFixed(1)}MB`);
+        } else {
+          console.warn(`[${slug}] FFmpeg failed (${ffResult.error}), using raw render`);
+        }
+      }
+
+      // ── 9. Export + SEO + deliver to Telegram ────────────────
+      setStatus("running", row.topic, 82);
+      await this.sheets.updateStatus(row.rowIndex, "Exporting");
+      console.log(`[${slug}] Delivering to Telegram...`);
+
+      // Save locally first
+      const outputDir  = path.resolve(this.config.app.outputDir, slug);
+      fs.mkdirSync(outputDir, { recursive: true });
+      const finalVideo = path.join(outputDir, `${slug}.mp4`);
+      fs.copyFileSync(finalVideoPath, finalVideo);
+
+      // Upload to Google Drive for cloud access
+      const driveLink = await uploadVideoToDrive(finalVideo, `${slug}.mp4`).catch(() => null);
+      if (driveLink) console.log(`[${slug}] Uploaded to Drive: ${driveLink}`);
+
+      // ── SEO metadata (rule-based, no API key required) ───────
+      console.log(`[${slug}] Generating SEO metadata...`);
+      const seo = this.seoGenerator.generateAndSave(
+        row.topic, row.style,
+        { a: row.hookA, b: row.hookB, c: row.hookC },
+        outputDir
+      );
+      console.log(`[${slug}] SEO: "${seo.title}" — ${seo.hashtags.length} hashtags`);
+
+      // Build Ottoflow-branded hashtags for Telegram delivery
+      const hashtags = this.branding.getHashtags(row, seo.hashtags);
+
+      // Compress for Telegram delivery if file exceeds 45 MB (bot limit is 50 MB)
+      let deliveryPath = finalVideo;
+      const finalStats = fs.statSync(finalVideo);
+      if (finalStats.size > 45 * 1024 * 1024 && FFmpegAgent.isAvailable()) {
+        console.log(`[${slug}] Re-compressing for Telegram (${(finalStats.size / 1024 / 1024).toFixed(1)} MB > 45 MB)...`);
+        const tgResult = await this.ffmpeg.postProcess(finalVideo, "minimal", {
+          fadeIn: 0, fadeOut: 0, crf: 33, suffix: "-tg",
+        });
+        if (tgResult.success) {
+          deliveryPath = tgResult.outputPath;
+          console.log(`[${slug}] Telegram copy: ${((fs.statSync(deliveryPath).size) / 1024 / 1024).toFixed(1)} MB`);
+        }
+      }
+
+      // ── 9. Deliver to Telegram ────────────────────────────────
+      setStatus("running", row.topic, 92);
+      await this.approvalBot.deliverVideo(
+        deliveryPath,
+        row.topic,
+        { a: row.hookA, b: row.hookB, c: row.hookC },
+        hashtags
       );
 
-      await this.sheets.updateStatus(product.rowIndex, "approval");
-      console.log(`[${productSlug}] Sending to Telegram for approval...`);
-
-      const thumbnailPath = path.join(tempDir, "thumbnail-preview.png");
-      fs.copyFileSync(processedImages[0], thumbnailPath);
-
-      const seo = {
-        title: product.productName,
-        description: product.description,
-        hashtags: product.hashtags.split(/[,\s]+/).filter(Boolean).map((h) => h.startsWith("#") ? h : `#${h}`),
-        hook: product.productName,
-        cta: "Link in bio!",
-      };
-
-      const approval = await this.approvalBot.requestApproval({
-        productSlug,
-        productName: product.productName,
-        thumbnailPath,
-        videoPath: renderResult.videoPath,
-        seo,
-        imageCount: imageFiles.length,
-      });
-
-      if (approval.decision === "rejected") {
-        await this.sheets.updateStatus(product.rowIndex, "rejected", "Rejected via Telegram");
-        console.log(`[${productSlug}] Rejected. Skipping export.`);
-        return {
-          productName: product.productName,
-          productSlug,
-          success: false,
-          error: "Rejected via Telegram approval",
-          timing: { startedAt, completedAt: new Date().toISOString(), durationMs: Date.now() - startTime },
-        };
+      // Remove temp delivery copy if it was created separately
+      if (deliveryPath !== finalVideo && fs.existsSync(deliveryPath)) {
+        fs.unlinkSync(deliveryPath);
       }
 
-      if (approval.decision === "timeout") {
-        await this.sheets.updateStatus(product.rowIndex, "error", "Approval timed out");
-        console.log(`[${productSlug}] Approval timed out. Skipping export.`);
-        return {
-          productName: product.productName,
-          productSlug,
-          success: false,
-          error: "Telegram approval timed out",
-          timing: { startedAt, completedAt: new Date().toISOString(), durationMs: Date.now() - startTime },
-        };
-      }
+      const outputLink = `outputs/${slug}/${slug}.mp4`;
 
-      console.log(`[${productSlug}] Approved! Exporting...`);
+      // Mark sheet complete + all platforms ready
+      await this.sheets.markComplete(row.rowIndex, outputLink);
+      await Promise.all([
+        this.sheets.updatePlatform(row.rowIndex, "tiktok",    "Uploaded"),
+        this.sheets.updatePlatform(row.rowIndex, "youtube",   "Uploaded"),
+        this.sheets.updatePlatform(row.rowIndex, "instagram", "Uploaded"),
+        this.sheets.updatePlatform(row.rowIndex, "facebook",  "Uploaded"),
+      ]);
 
-      await this.sheets.updateStatus(product.rowIndex, "exporting");
+      console.log(`[${slug}] Delivered to Telegram! Local copy → ${outputLink}`);
+      return this.result(row.topic, slug, true, undefined, startedAt, startTime, outputLink, outputDir);
 
-      const outputDir = path.resolve(this.config.app.outputDir, productSlug);
-      fs.mkdirSync(outputDir, { recursive: true });
-
-      const finalVideoPath = path.join(outputDir, `${productSlug}.mp4`);
-      fs.copyFileSync(renderResult.videoPath!, finalVideoPath);
-
-      fs.writeFileSync(path.join(outputDir, "title.txt"), product.productName, "utf-8");
-      fs.writeFileSync(path.join(outputDir, "description.txt"), product.description, "utf-8");
-      fs.writeFileSync(path.join(outputDir, "hashtags.txt"), product.hashtags, "utf-8");
-
-      const videoUrl = `outputs/${productSlug}/${productSlug}.mp4`;
-      await this.sheets.markComplete(product.rowIndex, videoUrl, imageFiles.length);
-      console.log(`[${productSlug}] Pipeline complete!`);
-
-      return {
-        productName: product.productName,
-        productSlug,
-        success: true,
-        videoUrl,
-        outputDir,
-        timing: { startedAt, completedAt: new Date().toISOString(), durationMs: Date.now() - startTime },
-      };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown pipeline error";
-      await this.sheets.updateStatus(product.rowIndex, "error", message);
-      console.error(`[${productSlug}] Pipeline failed: ${message}`);
-      return {
-        productName: product.productName,
-        productSlug,
-        success: false,
-        error: message,
-        timing: { startedAt, completedAt: new Date().toISOString(), durationMs: Date.now() - startTime },
-      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      await this.sheets.updateStatus(row.rowIndex, "Error", msg);
+      console.error(`[${slug}] Failed: ${msg}`);
+      return this.result(row.topic, slug, false, msg, startedAt, startTime);
     }
   }
 
-  private buildVideoData(
-    product: ProductRow,
-    productSlug: string,
-    imagePaths: string[]
-  ): ProductVideoData {
-    const hashtagList = product.hashtags
-      .split(/[,\s#]+/)
-      .filter(Boolean);
+  // === Fetch Pexels backgrounds based on topic + style ===
 
-    const relativeImagePaths = imagePaths.map(
-      (p) => `content/${productSlug}/images/${path.basename(p)}`
-    );
-
-    return {
-      productSlug,
-      brandColors: {
-        primary: "#6366f1",
-        secondary: "#8b5cf6",
-        accent: "#f59e0b",
-        background: "#0a0a0a",
-        text: "#ffffff",
-      },
-      hook: {
-        painPointQuestion: product.description.split(".")[0] || `Check out ${product.productName}!`,
-      },
-      productIntro: {
-        productName: product.productName,
-        tagline: product.description.split(".").slice(0, 1).join(".") || product.productName,
-      },
-      simulatedDemo: {
-        inputPlaceholder: "Search for products...",
-        typedText: product.productName,
-        buttonText: "Shop Now",
-        resultText: `${product.productName} — Available Now!`,
-        resultSubtext: hashtagList.slice(0, 3).map((h) => `#${h}`).join(" ") || "Trending on TikTok",
-      },
-      imageShowcase: {
-        images: relativeImagePaths.slice(0, 4).map((p, i) => ({
-          path: p,
-          headline: i === 0 ? "Premium Quality" : i === 1 ? "Best Seller" : i === 2 ? "Top Rated" : "Must Have",
-        })),
-      },
-      featureCallouts: {
-        productImagePath: relativeImagePaths[0],
-        features: [
-          { icon: "check" as const, text: "Premium quality guaranteed" },
-          { icon: "lightning" as const, text: "Fast shipping available" },
-          { icon: "star" as const, text: "Trending on TikTok Shop" },
-        ],
-      },
-      socialProofCta: {
-        socialProofNumber: 10000,
-        socialProofLabel: "happy customers",
-        ctaUrl: "Link in bio ↗",
-      },
-    };
+  // Remotion's bundle copies publicDir at build time, so relative paths break for
+  // files downloaded after bundling. Using absolute localhost URLs lets Chrome fetch
+  // directly from the running Next.js server, bypassing the stale bundle copy.
+  private bgUrl(rel: string): string {
+    const port = process.env.PORT || "3000";
+    return `http://localhost:${port}/${rel}`;
   }
 
-  private slugify(text: string): string {
-    return text
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
+  private async fetchBackgrounds(
+    topic: string,
+    style: string,
+    slug: string,
+    videoQueries: string[] = []
+  ): Promise<{ photos: string[]; videos: string[] }> {
+    // Always check for existing cached backgrounds first
+    const existing = this.scanExistingBackgrounds(slug);
+
+    if (!process.env.PEXELS_API_KEY) {
+      if (existing.videos.length > 0 || existing.photos.length > 0) {
+        console.log(`[${slug}] Reusing ${existing.videos.length} cached video(s) + ${existing.photos.length} photo(s)`);
+        return existing;
+      }
+      console.log(`[${slug}] Skipping Pexels (no API key, no cache)`);
+      return { photos: [], videos: [] };
+    }
+
+    try {
+      const pexels     = new PexelsClient();
+      const bgStyle    = this.styleToBackground(style);
+      const result     = await pexels.fetchProductBackgrounds(topic, slug, {
+        photoCount:   6,
+        videoCount:   6,
+        style:        bgStyle,
+        videoQueries: videoQueries.length > 0 ? videoQueries : undefined,
+      });
+
+      return {
+        photos: result.photos.map((p) =>
+          this.bgUrl(path.relative(path.resolve("public"), p).replace(/\\/g, "/"))
+        ),
+        videos: result.videos.map((v) =>
+          this.bgUrl(path.relative(path.resolve("public"), v).replace(/\\/g, "/"))
+        ),
+      };
+    } catch (err) {
+      console.warn(`Pexels fetch failed:`, err instanceof Error ? err.message : err);
+      // Fall back to cached backgrounds on API error
+      if (existing.videos.length > 0 || existing.photos.length > 0) {
+        console.log(`[${slug}] Falling back to ${existing.videos.length} cached video(s)`);
+        return existing;
+      }
+      return { photos: [], videos: [] };
+    }
+  }
+
+  /** Scan public/content/{slug}/backgrounds/ and return absolute localhost URLs */
+  private scanExistingBackgrounds(slug: string): { photos: string[]; videos: string[] } {
+    const bgDir = path.resolve("public", "content", slug, "backgrounds");
+    if (!fs.existsSync(bgDir)) return { photos: [], videos: [] };
+
+    const files = fs.readdirSync(bgDir);
+    const photos: string[] = [];
+    const videos: string[] = [];
+
+    for (const f of files) {
+      const url = this.bgUrl(`content/${slug}/backgrounds/${f}`);
+      const lower = f.toLowerCase();
+      if (lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".mov")) {
+        videos.push(url);
+      } else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp")) {
+        photos.push(url);
+      }
+    }
+
+    return { photos, videos };
+  }
+
+  // === Map content style to Pexels background style ===
+
+  private styleToBackground(style: string): "dark" | "light" | "abstract" | "lifestyle" {
+    const s = style.toLowerCase();
+    if (s.includes("lifestyle") || s.includes("startup")) return "lifestyle";
+    if (s.includes("luxury"))                               return "light";
+    if (s.includes("motivational") || s.includes("bold"))  return "abstract";
+    return "dark";
+  }
+
+  // === Helpers ===
+
+
+  private result(
+    topic: string, slug: string, success: boolean,
+    error: string | undefined, startedAt: string, startTime: number,
+    outputLink?: string, outputDir?: string
+  ): PipelineResult {
+    return {
+      topic, slug, success, error, outputLink, outputDir,
+      timing: {
+        startedAt,
+        completedAt: new Date().toISOString(),
+        durationMs:  Date.now() - startTime,
+      },
+    };
   }
 }

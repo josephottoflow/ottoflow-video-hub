@@ -16,6 +16,13 @@ import { BeforeAfterVideo, beforeafterSchema } from "./before-after/BeforeAfterV
 import { BEF_FPS, BEF_WIDTH, BEF_HEIGHT, BEF_TOTAL_FRAMES } from "./before-after/types";
 import { CinematicVideo, cinematicSchema } from "./cinematic/CinematicVideo";
 import { CIN_FPS, CIN_WIDTH, CIN_HEIGHT, CIN_TOTAL_FRAMES } from "./engine/types";
+import { ListicleVideo, listicleSchema, LIST_FPS, LIST_W, LIST_H, LIST_TOTAL } from "./listicle/ListicleVideo";
+import { StatsStoryVideo, statsStorySchema, SS_FPS, SS_W, SS_H, SS_TOTAL } from "./stats-story/StatsStoryVideo";
+import { TutorialVideo, tutorialSchema, TUT_FPS, TUT_W, TUT_H, TUT_TOTAL } from "./tutorial/TutorialVideo";
+import { MythBusterVideo, mythBusterSchema, MB_FPS, MB_W, MB_H, MB_TOTAL } from "./myth-buster/MythBusterVideo";
+import { QuoteCardVideo, quoteCardSchema, QC_FPS, QC_W, QC_H, QC_TOTAL } from "./quote-card/QuoteCardVideo";
+import { V2UGCVideo, v2UGCSchema }                                        from "./v2-ugc/V2UGCVideo";
+import { V2_FPS, V2_WIDTH, V2_HEIGHT, V2_TOTAL }                          from "./v2-ugc/types";
 
 export const RemotionRoot: React.FC = () => {
   const staticFiles = getStaticFiles();
@@ -179,6 +186,90 @@ export const RemotionRoot: React.FC = () => {
         defaultProps={{ data: null }}
       />
 
+      {/* ── New templates ── */}
+
+      {/* Listicle — numbered reveal list (educational breakdowns) */}
+      <Composition
+        id="listicle"
+        component={ListicleVideo}
+        fps={LIST_FPS}
+        width={LIST_W}
+        height={LIST_H}
+        durationInFrames={LIST_TOTAL}
+        schema={listicleSchema}
+        defaultProps={{ data: null }}
+      />
+
+      {/* Stats Story — data-driven big number impact */}
+      <Composition
+        id="stats-story"
+        component={StatsStoryVideo}
+        fps={SS_FPS}
+        width={SS_W}
+        height={SS_H}
+        durationInFrames={SS_TOTAL}
+        schema={statsStorySchema}
+        defaultProps={{ data: null }}
+      />
+
+      {/* Tutorial — step-by-step how-to with progress bar */}
+      <Composition
+        id="tutorial"
+        component={TutorialVideo}
+        fps={TUT_FPS}
+        width={TUT_W}
+        height={TUT_H}
+        durationInFrames={TUT_TOTAL}
+        schema={tutorialSchema}
+        defaultProps={{ data: null }}
+      />
+
+      {/* Myth Buster — MYTH → REALITY dramatic reveal */}
+      <Composition
+        id="myth-buster"
+        component={MythBusterVideo}
+        fps={MB_FPS}
+        width={MB_W}
+        height={MB_H}
+        durationInFrames={MB_TOTAL}
+        schema={mythBusterSchema}
+        defaultProps={{ data: null }}
+      />
+
+      {/* Quote Card — cinematic word-by-word quote reveal */}
+      <Composition
+        id="quote-card"
+        component={QuoteCardVideo}
+        fps={QC_FPS}
+        width={QC_W}
+        height={QC_H}
+        durationInFrames={QC_TOTAL}
+        schema={quoteCardSchema}
+        defaultProps={{ data: null }}
+      />
+
+      {/* V2 UGC — AI-generated scenes, bold captions, Telegram approval gate */}
+      <Composition
+        id="v2-ugc"
+        component={V2UGCVideo}
+        fps={V2_FPS}
+        width={V2_WIDTH}
+        height={V2_HEIGHT}
+        durationInFrames={V2_TOTAL}
+        schema={v2UGCSchema}
+        defaultProps={{
+          data: {
+            topic: "V2 Preview",
+            scenes: {
+              hook:    { imagePath: "", caption: "Stop scrolling now",  keyWord: "STOP"  },
+              insight: { imagePath: "", caption: "Here is the truth",   keyWord: "TRUTH" },
+              cta:     { imagePath: "", caption: "Follow for more",     keyWord: "FOLLOW"},
+            },
+          },
+        }}
+      />
+
+
       {/* Cinematic - Apple-style premium product video */}
       <Composition
         id="cinematic"
@@ -190,33 +281,26 @@ export const RemotionRoot: React.FC = () => {
         schema={cinematicSchema}
         defaultProps={{
           data: {
-            images: [
-              // Clean product photos first (hero + hook priority)
-              "content/ultralight-foldable-camping-chair/images/frame-05.png",  // Clean khaki chair — HERO
-              "content/ultralight-foldable-camping-chair/images/frame-06.png",  // Lifestyle carry bag — HOOK
-              // Infographic images last (features/proof fallback only)
-              "content/ultralight-foldable-camping-chair/images/frame-04.png",  // Detail pocket shot
-              "content/ultralight-foldable-camping-chair/images/frame-02.png",  // Color variants
-            ],
-            headline: "Ultralight Camping Chair",
-            subheadline: "Sets up in seconds — sturdy aluminum frame",
-            problemText: "Still searching for the perfect camping chair?",
+            images: [],
+            headline: "Ottoflow",
+            subheadline: "AI-powered short-form video at scale",
+            problemText: "Still making videos manually in 2025?",
             bulletPoints: [],
-            cta: "Shop Now",
-            price: "$29.99",
-            theme: "outdoor" as const,
-            colorHint: "#22c55e",
+            cta: "Try Ottoflow",
+            price: "",
+            theme: "tech" as const,
+            colorHint: "#6366f1",
             socialProof: {
               number: 10000,
-              label: "happy customers",
+              label: "videos generated",
             },
             backgroundImages: [
-              "https://videos.pexels.com/video-files/19281575/19281575-hd_1080_1920_30fps.mp4",   // Hook
-              "https://videos.pexels.com/video-files/34142319/14476178_1080_1920_60fps.mp4",   // Problem
-              "https://videos.pexels.com/video-files/30009146/12875267_1080_1920_30fps.mp4",   // Hero
-              "https://videos.pexels.com/video-files/37218116/15766888_1080_1920_30fps.mp4",   // Features
-              "https://videos.pexels.com/video-files/28265425/12344352_1080_1920_60fps.mp4",   // Proof
-              "https://videos.pexels.com/video-files/19281575/19281575-hd_1080_1920_30fps.mp4",   // CTA
+              "backgrounds/cinematic-smoke-test/bg-hook.mp4",
+              "backgrounds/cinematic-smoke-test/bg-problem.mp4",
+              "backgrounds/cinematic-smoke-test/bg-hero.mp4",
+              "backgrounds/cinematic-smoke-test/bg-features.mp4",
+              "backgrounds/cinematic-smoke-test/bg-proof.mp4",
+              "backgrounds/cinematic-smoke-test/bg-hook.mp4",
             ],
             ctaStyle: "tiktok-basket" as const,
           },

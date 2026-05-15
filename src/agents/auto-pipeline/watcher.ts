@@ -196,7 +196,3 @@ export function startWatcher(inputDir: string, outputDir: string): void {
 
   poll();
 }
-  };
-
-  poll();
-}

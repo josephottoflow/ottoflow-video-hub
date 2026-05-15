@@ -10,7 +10,7 @@ import { validateConfig } from "../agents/config/config";
 import { PipelineOrchestrator } from "../agents/pipeline/orchestrator";
 
 async function main() {
-  console.log("🏭 TikTok Product Video Factory\n");
+  console.log("🏭 Ottoflow Video Hub\n");
 
   // Validate environment
   const validation = validateConfig();
@@ -33,7 +33,7 @@ async function main() {
     const icon = r.success ? "✅" : "❌";
     const time = `${Math.round(r.timing.durationMs / 1000)}s`;
     console.log(
-      `  ${icon} ${r.productName} — ${r.success ? r.videoUrl : r.error} (${time})`
+      `  ${icon} ${r.topic} — ${r.success ? r.outputLink : r.error} (${time})`
     );
   }
 
