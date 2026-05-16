@@ -323,20 +323,29 @@ export class TelegramApprovalBot {
   ): Promise<ApprovalDecision> {
     const startTime = Date.now();
     let lastUpdateId = 0;
+    let consecutiveErrors = 0;
 
     while (Date.now() - startTime < this.timeoutMs) {
       try {
-        const url = new URL(
-          `${TELEGRAM_API}${this.botToken}/getUpdates`
-        );
+        const url = new URL(`${TELEGRAM_API}${this.botToken}/getUpdates`);
         url.searchParams.set("offset", String(lastUpdateId + 1));
-        url.searchParams.set("timeout", "5"); // long-poll 5 seconds
+        url.searchParams.set("timeout", "5");
         url.searchParams.set("allowed_updates", '["callback_query"]');
 
-        const res = await fetch(url.toString());
+        const res = await fetch(url.toString(), { signal: AbortSignal.timeout(15_000) });
+        if (!res.ok) {
+          console.warn(`[telegram] getUpdates HTTP ${res.status} — retrying`);
+          await new Promise((r) => setTimeout(r, 3000));
+          continue;
+        }
         const data = await res.json();
+        consecutiveErrors = 0;
 
-        if (!data.ok) continue;
+        if (!data.ok) {
+          console.warn(`[telegram] getUpdates not ok: ${data.description}`);
+          await new Promise((r) => setTimeout(r, 3000));
+          continue;
+        }
 
         for (const update of data.result || []) {
           lastUpdateId = update.update_id;
@@ -353,19 +362,23 @@ export class TelegramApprovalBot {
             await this.answerCallback(
               callback.id,
               isApprove ? "✅ Approved!" : isRetry ? "🔄 Queued for retry" : "❌ Rejected!"
-            );
+            ).catch((e) => console.warn("[telegram] answerCallback failed:", e));
 
             await this.editMessageButtons(
               callback.message.message_id,
               isApprove ? "✅ APPROVED" : isRetry ? "🔄 RETRY REQUESTED" : "❌ REJECTED"
-            );
+            ).catch((e) => console.warn("[telegram] editMessageButtons failed:", e));
 
             return isApprove ? "approved" : "rejected";
           }
         }
-      } catch {
-        // Network error — wait a bit and retry
-        await new Promise((r) => setTimeout(r, 2000));
+      } catch (err) {
+        consecutiveErrors++;
+        const backoffMs = Math.min(2000 * Math.pow(2, consecutiveErrors - 1), 30_000);
+        console.warn(
+          `[telegram] Poll error #${consecutiveErrors}: ${err instanceof Error ? err.message : err} — retrying in ${backoffMs}ms`
+        );
+        await new Promise((r) => setTimeout(r, backoffMs));
       }
     }
 

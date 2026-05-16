@@ -15,9 +15,20 @@ import { Worker, Job } from "bullmq";
 import { redisConnection, RENDER_QUEUE, RenderJobData } from "../lib/queue";
 import { PipelineOrchestrator }   from "../agents/pipeline/orchestrator";
 import { PipelineOrchestratorV2 } from "../agents/pipeline/orchestrator-v2";
-import { updateJobStatus } from "../lib/db";
+import { updateJobStatus, markStuckJobsError } from "../lib/db";
 
 const CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
+
+async function checkRedis(): Promise<void> {
+  try {
+    await redisConnection.ping();
+    console.log("[worker] Redis connected ✓");
+  } catch (err) {
+    console.error("[worker] Cannot reach Redis:", err instanceof Error ? err.message : err);
+    console.error("[worker] Check REDIS_URL in .env and ensure Upstash is reachable.");
+    process.exit(1);
+  }
+}
 
 async function processJob(job: Job<RenderJobData>): Promise<void> {
   const { rowIndex, template, topic, dbJobId, version } = job.data;
@@ -25,60 +36,95 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
   console.log(`\n[worker] ── Job ${dbJobId} ──`);
   console.log(`[worker] Topic: ${topic} | Template: ${template} | Version: ${version ?? "v1"} | Row: ${rowIndex}`);
 
-  await updateJobStatus(dbJobId, "processing", { bull_job_id: job.id });
+  try {
+    await updateJobStatus(dbJobId, "processing", { bull_job_id: job.id });
+  } catch (err) {
+    console.warn("[worker] Could not update job status to processing:", err instanceof Error ? err.message : err);
+  }
 
   const startTime = Date.now();
-  const result    = version === "v2"
-    ? await new PipelineOrchestratorV2().processSingleByRowIndex(rowIndex)
-    : await new PipelineOrchestrator().processSingleByRowIndex(rowIndex, template);
+  let result;
+  try {
+    result = version === "v2"
+      ? await new PipelineOrchestratorV2().processSingleByRowIndex(rowIndex)
+      : await new PipelineOrchestrator().processSingleByRowIndex(rowIndex, template);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown pipeline error";
+    const durationMs = Date.now() - startTime;
+    try {
+      await updateJobStatus(dbJobId, "error", { error: message, duration_ms: durationMs });
+    } catch (dbErr) {
+      console.warn("[worker] Could not write error status to DB:", dbErr instanceof Error ? dbErr.message : dbErr);
+    }
+    throw new Error(message);
+  }
+
   const durationMs = Date.now() - startTime;
 
   if (result.success) {
-    await updateJobStatus(dbJobId, "done", {
-      output_path: result.outputDir,
-      output_link: result.outputLink,
-      duration_ms: durationMs,
-    });
+    try {
+      await updateJobStatus(dbJobId, "done", {
+        output_path: result.outputDir,
+        output_link: result.outputLink,
+        duration_ms: durationMs,
+      });
+    } catch (dbErr) {
+      console.warn("[worker] Could not write done status to DB:", dbErr instanceof Error ? dbErr.message : dbErr);
+    }
     console.log(`[worker] Done: ${topic} → ${result.outputLink} (${Math.round(durationMs / 1000)}s)`);
   } else {
-    await updateJobStatus(dbJobId, "error", {
-      error:       result.error,
-      duration_ms: durationMs,
-    });
-    // Re-throwing causes BullMQ to mark the job failed and handle retries
+    try {
+      await updateJobStatus(dbJobId, "error", { error: result.error, duration_ms: durationMs });
+    } catch (dbErr) {
+      console.warn("[worker] Could not write error status to DB:", dbErr instanceof Error ? dbErr.message : dbErr);
+    }
     throw new Error(result.error || "Pipeline failed");
   }
 }
 
-const worker = new Worker<RenderJobData>(RENDER_QUEUE, processJob, {
-  connection:    redisConnection,
-  concurrency:   CONCURRENCY,
-  lockDuration:  600_000,   // 10 min — renders can be slow
-  lockRenewTime: 120_000,   // renew every 2 min
-});
+async function startup() {
+  await checkRedis();
 
-worker.on("completed", (job) => {
-  console.log(`[worker] Completed: ${job.id}`);
-});
+  // Clear any jobs that were left in "processing" from a previous crash
+  try {
+    const cleaned = await markStuckJobsError(15 * 60 * 1000);
+    if (cleaned > 0) console.log(`[worker] Marked ${cleaned} stuck job(s) as error on startup`);
+  } catch (err) {
+    console.warn("[worker] Could not clean stuck jobs (DB may be unreachable):", err instanceof Error ? err.message : err);
+  }
 
-worker.on("failed", (job, err) => {
-  console.error(`[worker] Failed: ${job?.id} — ${err.message}`);
-});
+  const worker = new Worker<RenderJobData>(RENDER_QUEUE, processJob, {
+    connection:    redisConnection,
+    concurrency:   CONCURRENCY,
+    lockDuration:  600_000,
+    lockRenewTime: 120_000,
+  });
 
-worker.on("error", (err) => {
-  console.error(`[worker] Error:`, err.message);
-});
+  worker.on("completed", (job) => {
+    console.log(`[worker] Completed: ${job.id}`);
+  });
 
-console.log(`[worker] Render worker started`);
-console.log(`[worker] Queue: ${RENDER_QUEUE} | Concurrency: ${CONCURRENCY}`);
-console.log(`[worker] Waiting for jobs...\n`);
+  worker.on("failed", (job, err) => {
+    console.error(`[worker] Failed: ${job?.id} — ${err.message}`);
+  });
 
-async function shutdown() {
-  console.log("[worker] Shutting down gracefully...");
-  await worker.close();
-  await redisConnection.quit();
-  process.exit(0);
+  worker.on("error", (err) => {
+    console.error(`[worker] Error:`, err.message);
+  });
+
+  console.log(`[worker] Render worker started`);
+  console.log(`[worker] Queue: ${RENDER_QUEUE} | Concurrency: ${CONCURRENCY}`);
+  console.log(`[worker] Waiting for jobs...\n`);
+
+  async function shutdown() {
+    console.log("[worker] Shutting down gracefully...");
+    await worker.close();
+    await redisConnection.quit();
+    process.exit(0);
+  }
+
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT",  shutdown);
 }
 
-process.on("SIGTERM", shutdown);
-process.on("SIGINT",  shutdown);
+startup();

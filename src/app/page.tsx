@@ -259,6 +259,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   const [queue,         setQueue]         = useState<QueueRow[]>([]);
   const [previewSlug,   setPreviewSlug]   = useState<string | undefined>(undefined);
   const [renderingRows, setRenderingRows] = useState<Set<number>>(new Set());
+  const [stuckCount,    setStuckCount]    = useState(0);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -313,6 +314,16 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   }, []);
 
   useEffect(() => { fetchQueue(); const t = setInterval(fetchQueue, 8000); return () => clearInterval(t); }, [fetchQueue]);
+
+  useEffect(() => {
+    const check = async () => {
+      const r = await fetch("/api/jobs?stuck=true").catch(() => null);
+      if (r?.ok) { const d = await r.json(); setStuckCount(d.count ?? 0); }
+    };
+    check();
+    const t = setInterval(check, 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   const runPipeline = async () => {
     setRunning(true); setLogs([]); setDoneAgents(new Set());
@@ -503,6 +514,18 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* Stuck jobs warning */}
+          {stuckCount > 0 && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 14px", borderRadius: 9, background: "rgba(244,63,94,0.1)", border: "1px solid rgba(244,63,94,0.3)" }}>
+              <span style={{ fontSize: 12, color: "#f43f5e", fontWeight: 600 }}>
+                {stuckCount} job{stuckCount > 1 ? "s" : ""} stuck in Processing for &gt;15 min
+              </span>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                Restart <code style={{ background: "rgba(255,255,255,0.06)", padding: "1px 5px", borderRadius: 4 }}>npm run worker</code> — it will auto-clean on startup
+              </span>
+            </div>
+          )}
 
           {/* 2-col: preview + queue */}
           <div style={{ display: "grid", gridTemplateColumns: "200px 1fr", gap: 12, flex: 1 }}>

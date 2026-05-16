@@ -112,3 +112,25 @@ export async function getJob(id: string): Promise<DbJob | null> {
   const { rows } = await getDb().query<DbJob>(`SELECT * FROM jobs WHERE id = $1`, [id]);
   return rows[0] ?? null;
 }
+
+export async function getStuckJobs(olderThanMs = 15 * 60 * 1000): Promise<DbJob[]> {
+  const cutoff = new Date(Date.now() - olderThanMs);
+  const { rows } = await getDb().query<DbJob>(
+    `SELECT * FROM jobs WHERE status = 'processing' AND started_at < $1 ORDER BY started_at`,
+    [cutoff]
+  );
+  return rows;
+}
+
+export async function markStuckJobsError(olderThanMs = 15 * 60 * 1000): Promise<number> {
+  const cutoff = new Date(Date.now() - olderThanMs);
+  const result = await getDb().query(
+    `UPDATE jobs
+     SET status = 'error',
+         error = 'Job timed out — worker may have crashed',
+         completed_at = NOW()
+     WHERE status = 'processing' AND started_at < $1`,
+    [cutoff]
+  );
+  return result.rowCount ?? 0;
+}
