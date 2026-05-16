@@ -1,0 +1,50 @@
+FROM node:20-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System libraries required by Chrome Headless Shell and Puppeteer
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    fonts-liberation \
+    libglib2.0-0 \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libgbm1 \
+    libxcb1 \
+    libxkbcommon0 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxrandr2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libatspi2.0-0 \
+    wget \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install node deps (includes Puppeteer Chrome download)
+COPY package*.json tsconfig.json ./
+RUN npm ci
+
+COPY . .
+
+# Pre-download Remotion's Chrome Headless Shell into the image layer
+RUN npx remotion browser install
+
+# Non-root user so Chrome sandbox works without --no-sandbox
+RUN useradd -m -u 1000 worker && chown -R worker:worker /app
+USER worker
+
+CMD ["npm", "run", "worker"]

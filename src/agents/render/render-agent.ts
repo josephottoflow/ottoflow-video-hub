@@ -86,6 +86,8 @@ export class RenderAgent {
         id:          compositionId,
         inputProps:  { data: videoData },
         timeoutInMilliseconds: 30_000,
+        // Software GL for containerised Linux (no GPU on Railway/cloud)
+        chromiumOptions: process.platform === "linux" ? { gl: "swangle" } : undefined,
       });
 
       // ── 3. Render ─────────────────────────────────────────
@@ -104,6 +106,8 @@ export class RenderAgent {
         concurrency: 2,
         // Per-frame timeout — large Pexels videos (24MB+) need extra seek time
         timeoutInMilliseconds: 180_000,
+        // Software GL for containerised Linux (no GPU on Railway/cloud)
+        chromiumOptions: process.platform === "linux" ? { gl: "swangle" } : undefined,
         onProgress: ({ progress }) => {
           const pct = Math.round(progress * 100);
           if (pct >= lastPct + 10) {

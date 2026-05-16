@@ -16,6 +16,7 @@ import { redisConnection, RENDER_QUEUE, RenderJobData } from "../lib/queue";
 import { PipelineOrchestrator }   from "../agents/pipeline/orchestrator";
 import { PipelineOrchestratorV2 } from "../agents/pipeline/orchestrator-v2";
 import { updateJobStatus, markStuckJobsError } from "../lib/db";
+import { ensureBrowser } from "@remotion/renderer";
 
 const CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
 
@@ -84,6 +85,14 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
 
 async function startup() {
   await checkRedis();
+
+  // Ensure Chrome Headless Shell is available (downloads if missing, fast if cached)
+  try {
+    await ensureBrowser();
+    console.log("[worker] Chrome Headless Shell ready ✓");
+  } catch (err) {
+    console.warn("[worker] Could not ensure browser:", err instanceof Error ? err.message : err);
+  }
 
   // Clear any jobs that were left in "processing" from a previous crash
   try {
