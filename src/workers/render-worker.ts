@@ -20,7 +20,7 @@ import { PipelineOrchestrator }   from "../agents/pipeline/orchestrator";
 import { PipelineOrchestratorV2 } from "../agents/pipeline/orchestrator-v2";
 import { updateJobStatus, markStuckJobsError, getJob } from "../lib/db";
 import { ensureBrowser } from "@remotion/renderer";
-import { emitLog, inferAgent, inferLevel, setStatus } from "../lib/pipeline-store";
+import { emitLog, inferAgent, inferLevel, setStatus, clearLogs } from "../lib/pipeline-store";
 
 const CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
 
@@ -85,6 +85,8 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
       return;
     }
   } catch { /* db blip — proceed */ }
+
+  clearLogs();
 
   try {
     await updateJobStatus(dbJobId, "processing", { bull_job_id: job.id });
