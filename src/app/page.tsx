@@ -119,9 +119,10 @@ function PageTitle({ title, sub }: { title: string; sub: string }) {
 
 // ─── Sidebar ─────────────────────────────────────────────────
 
-function Sidebar({ view, setView, pipeStatus, activeAgent }: {
+function Sidebar({ view, setView, pipeStatus, activeAgent, tier, setTier }: {
   view: View; setView: (v: View) => void;
   pipeStatus: Status; activeAgent: string;
+  tier: Tier; setTier: (t: Tier) => void;
 }) {
   const isRunning = pipeStatus === "running";
   const isDone    = pipeStatus === "done";
@@ -204,8 +205,38 @@ function Sidebar({ view, setView, pipeStatus, activeAgent }: {
         })}
       </nav>
 
+      {/* Tier Toggle */}
+      <div style={{ padding: "12px 12px 0", borderTop: "1px solid var(--border)" }}>
+        <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8, paddingLeft: 4 }}>Pipeline Tier</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {(["basic", "advanced"] as Tier[]).map(t => (
+            <button key={t} onClick={() => setTier(t)} style={{
+              width: "100%", padding: "8px 12px", borderRadius: 8,
+              border: `1px solid ${tier === t ? (t === "advanced" ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.15)") : "var(--border)"}`,
+              cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700,
+              textAlign: "left", display: "flex", alignItems: "center", gap: 8,
+              transition: "all 0.15s",
+              background: tier === t
+                ? (t === "advanced" ? "linear-gradient(135deg,rgba(99,102,241,0.25),rgba(167,139,250,0.15))" : "rgba(255,255,255,0.07)")
+                : "transparent",
+              color: tier === t ? (t === "advanced" ? "#a78bfa" : "var(--text)") : "var(--text-muted)",
+              boxShadow: tier === t && t === "advanced" ? "0 0 12px rgba(99,102,241,0.2)" : "none",
+            }}>
+              <span style={{ fontSize: 14 }}>{t === "advanced" ? "⚡" : "◎"}</span>
+              <div>
+                <div>{t === "advanced" ? "Advanced" : "Basic"}</div>
+                <div style={{ fontSize: 9, fontWeight: 500, color: "var(--text-muted)", marginTop: 1 }}>
+                  {t === "advanced" ? "Veo · Sheet2" : "Pexels · Sheet1"}
+                </div>
+              </div>
+              {tier === t && <CheckCircle2 size={12} style={{ marginLeft: "auto", flexShrink: 0 }} color={t === "advanced" ? "#a78bfa" : "var(--text-muted)"} />}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Footer */}
-      <div style={{ padding: "12px 16px 16px", borderTop: "1px solid var(--border)" }}>
+      <div style={{ padding: "12px 16px 16px", marginTop: 12 }}>
         <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.8 }}>
           <div style={{ fontWeight: 600, color: "var(--text-secondary)", fontSize: 11 }}>joseph@ottoflow.ai</div>
           <div style={{ color: "var(--primary)", fontWeight: 700, fontSize: 11 }}>ottoflow.ai</div>
@@ -224,9 +255,10 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   const [currentTopic, setCurrentTopic] = useState("");
   const [progress,     setProgress]     = useState(0);
   const [logs,         setLogs]         = useState<LogEntry[]>([]);
-  const [running,      setRunning]      = useState(false);
-  const [queue,        setQueue]        = useState<QueueRow[]>([]);
-  const [previewSlug,  setPreviewSlug]  = useState<string | undefined>(undefined);
+  const [running,       setRunning]       = useState(false);
+  const [queue,         setQueue]         = useState<QueueRow[]>([]);
+  const [previewSlug,   setPreviewSlug]   = useState<string | undefined>(undefined);
+  const [renderingRows, setRenderingRows] = useState<Set<number>>(new Set());
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -289,6 +321,20 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     setRunning(false); fetchQueue();
   };
 
+  const renderRow = async (row: QueueRow) => {
+    setRenderingRows(prev => new Set([...prev, row.rowIndex]));
+    toast.loading(`Rendering: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
+    const endpoint = tier === "advanced" ? "/api/pipeline/v2" : "/api/pipeline";
+    const res = await fetch(endpoint, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rowIndex: row.rowIndex }),
+    }).catch(() => null);
+    setRenderingRows(prev => { const s = new Set(prev); s.delete(row.rowIndex); return s; });
+    if (res?.ok) toast.success(`Queued: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
+    else         toast.error(`Failed: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
+    fetchQueue();
+  };
+
   const agents = tier === "advanced" ? V2_PIPELINE_AGENTS : PIPELINE_AGENTS;
 
   const stats = {
@@ -338,22 +384,10 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
               <span style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.4px" }}>{label}</span>
             </div>
           ))}
-          {/* Tier toggle */}
-          <div style={{ display: "flex", background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8, padding: 2, gap: 2 }}>
-            {(["basic", "advanced"] as Tier[]).map(t => (
-              <button key={t} onClick={() => setTier(t)} style={{
-                padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer",
-                fontFamily: "inherit", fontSize: 11, fontWeight: 700, letterSpacing: "0.3px",
-                textTransform: "capitalize", transition: "all 0.15s",
-                background: tier === t ? (t === "advanced" ? "linear-gradient(135deg,#6366f1,#a78bfa)" : "var(--bg-card)") : "transparent",
-                color: tier === t ? (t === "advanced" ? "#fff" : "var(--text)") : "var(--text-muted)",
-                boxShadow: tier === t ? "0 2px 8px rgba(99,102,241,0.3)" : "none",
-              }}>
-                {t === "advanced" ? "⚡ Advanced" : "Basic"}
-              </button>
-            ))}
+          <div style={{ padding: "3px 10px", borderRadius: 6, background: tier === "advanced" ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.05)", border: `1px solid ${tier === "advanced" ? "rgba(99,102,241,0.3)" : "var(--border)"}`, fontSize: 10, fontWeight: 700, color: tier === "advanced" ? "#a78bfa" : "var(--text-muted)" }}>
+            {tier === "advanced" ? "⚡ Advanced" : "◎ Basic"}
           </div>
-          <button className="btn btn-primary btn-sm" onClick={runPipeline} disabled={running} style={{ marginLeft: 4, gap: 5 }}>
+          <button className="btn btn-primary btn-sm" onClick={runPipeline} disabled={running} style={{ gap: 5 }}>
             {running
               ? <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Running…</>
               : <><Play size={12} fill="currentColor" /> Run Pipeline</>}
@@ -502,14 +536,39 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                 {queue.length === 0 ? (
                   <div style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", padding: "24px 0" }}>No content in queue</div>
                 ) : (
-                  queue.slice(0, 20).map((row) => (
-                    <div key={row.rowIndex} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderBottom: "1px solid var(--border)", gap: 8 }}>
-                      <span style={{ fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                        {displayTopic(row.topic)}
-                      </span>
-                      <StatusPill status={row.status} />
-                    </div>
-                  ))
+                  queue.slice(0, 20).map((row) => {
+                    const isRendering = renderingRows.has(row.rowIndex);
+                    const isDone      = ["Done","Complete"].includes(row.status);
+                    return (
+                      <div key={row.rowIndex} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 12px", borderBottom: "1px solid var(--border)", gap: 8 }}>
+                        <span style={{ fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                          {displayTopic(row.topic)}
+                        </span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                          <StatusPill status={row.status} />
+                          {!isDone && (
+                            <button
+                              onClick={() => renderRow(row)}
+                              disabled={isRendering}
+                              style={{
+                                display: "flex", alignItems: "center", gap: 3,
+                                padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)",
+                                background: isRendering ? "var(--bg)" : "var(--primary-light)",
+                                color: isRendering ? "var(--text-muted)" : "var(--accent)",
+                                cursor: isRendering ? "not-allowed" : "pointer",
+                                fontSize: 10, fontWeight: 700, fontFamily: "inherit",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {isRendering
+                                ? <><Loader2 size={9} style={{ animation: "spin 1s linear infinite" }} /> …</>
+                                : <><Play size={9} fill="currentColor" /> Render</>}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -1258,7 +1317,7 @@ export default function App() {
         richColors
       />
       <div style={{ display: "flex", minHeight: "100vh" }}>
-        <Sidebar view={view} setView={setView} pipeStatus={pipeStatus} activeAgent={activeAgent} />
+        <Sidebar view={view} setView={setView} pipeStatus={pipeStatus} activeAgent={activeAgent} tier={tier} setTier={setTier} />
         <main style={{ flex: 1, minWidth: 0, overflowY: view === "center" ? "hidden" : "auto", height: view === "center" ? "100vh" : undefined, display: "flex", flexDirection: "column", position: "relative", background: "var(--bg)" }}>
           <AnimatePresence mode="wait">
             <motion.div
