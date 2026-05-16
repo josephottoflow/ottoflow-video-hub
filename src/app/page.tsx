@@ -269,7 +269,8 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   const [startupInstalled, setStartupInstalled] = useState(false);
   const [workerLogs,       setWorkerLogs]       = useState<string[]>([]);
   const [showWorkerLogs,   setShowWorkerLogs]   = useState(false);
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const logEndRef   = useRef<HTMLDivElement>(null);
+  const logPanelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let es: EventSource;
@@ -318,7 +319,10 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     return () => { es?.close(); clearTimeout(reconnectTimer); };
   }, []);
 
-  useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
+  useEffect(() => {
+    const el = logPanelRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [logs]);
 
   const fetchQueue = useCallback(async () => {
     const r = await fetch("/api/queue").catch(() => null);
@@ -1095,7 +1099,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
             </span>
             <button onClick={() => { setLogs([]); fetch("/api/pipeline-events", { method: "DELETE" }).catch(() => {}); }} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 9, fontFamily: "inherit", fontWeight: 700, letterSpacing: "0.5px" }}>CLEAR</button>
           </div>
-          <div style={{ flex: 1, overflowY: "auto", padding: "6px 0", fontFamily: "'SF Mono','Fira Code',monospace", fontSize: 10.5 }}>
+          <div ref={logPanelRef} style={{ flex: 1, overflowY: "auto", padding: "6px 0", fontFamily: "'SF Mono','Fira Code',monospace", fontSize: 10.5 }}>
             {logs.length === 0 ? (
               <div style={{ padding: "32px 16px", color: "var(--text-muted)", textAlign: "center", lineHeight: 2 }}>
                 <Terminal size={22} style={{ opacity: 0.15, display: "block", margin: "0 auto 8px" }} />
@@ -1116,7 +1120,6 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                 </div>
               </div>
             ))}
-            <div ref={logEndRef} />
           </div>
         </div>
       </div>
