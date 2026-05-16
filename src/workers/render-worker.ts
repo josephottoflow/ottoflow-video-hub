@@ -15,7 +15,7 @@ import { Worker, Job } from "bullmq";
 import { redisConnection, RENDER_QUEUE, RenderJobData } from "../lib/queue";
 import { PipelineOrchestrator }   from "../agents/pipeline/orchestrator";
 import { PipelineOrchestratorV2 } from "../agents/pipeline/orchestrator-v2";
-import { updateJobStatus, markStuckJobsError } from "../lib/db";
+import { updateJobStatus, markStuckJobsError, getJob } from "../lib/db";
 import { ensureBrowser } from "@remotion/renderer";
 
 const CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
@@ -36,6 +36,15 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
 
   console.log(`\n[worker] ── Job ${dbJobId} ──`);
   console.log(`[worker] Topic: ${topic} | Template: ${template} | Version: ${version ?? "v1"} | Row: ${rowIndex}`);
+
+  // Check if this job was killed via the UI before we start any work
+  try {
+    const dbJob = await getJob(dbJobId);
+    if (dbJob?.status === "error") {
+      console.log(`[worker] Job ${dbJobId} was killed — skipping`);
+      return;
+    }
+  } catch { /* db blip — proceed */ }
 
   try {
     await updateJobStatus(dbJobId, "processing", { bull_job_id: job.id });
