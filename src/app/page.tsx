@@ -595,14 +595,21 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
               <span style={{ fontSize: 11, color: "var(--text-muted)" }}>— Renders will queue but won&apos;t process until the worker starts.</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-              {/* Download button */}
+              {/* Download button — detects OS */}
               <button
                 onClick={() => {
-                  const bat = `@echo off\r\ntitle Ottoflow Agent Setup\r\ncd /d "%~dp0"\r\necho.\r\necho  ============================================\r\necho   Ottoflow - Starting Worker Agent...\r\necho   This window will close automatically.\r\necho  ============================================\r\necho.\r\nnode local-agent.js\r\n`;
-                  const blob = new Blob([bat], { type: "application/octet-stream" });
+                  const isMac = /mac|darwin|iphone|ipad/i.test(navigator.userAgent);
+                  let content: string, filename: string;
+                  if (isMac) {
+                    content  = `#!/bin/bash\nDIR="$(cd "$(dirname "$0")" && pwd)"\ncd "$DIR"\necho "Starting Ottoflow Agent..."\nnode local-agent.js\n`;
+                    filename = "start-agent.command";
+                  } else {
+                    content  = `@echo off\r\ntitle Ottoflow Agent\r\ncd /d "%~dp0"\r\necho Starting Ottoflow Agent...\r\nnode local-agent.js\r\n`;
+                    filename = "start-agent.bat";
+                  }
                   const a = document.createElement("a");
-                  a.href = URL.createObjectURL(blob);
-                  a.download = "start-agent.bat";
+                  a.href = URL.createObjectURL(new Blob([content], { type: "application/octet-stream" }));
+                  a.download = filename;
                   a.click();
                 }}
                 style={{
@@ -634,19 +641,33 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
               </button>
             </div>
           </div>
-          {/* Row 2: 2-step note */}
+          {/* Row 2: OS-aware 2-step note */}
           <div style={{
-            marginTop: 8, padding: "7px 12px", borderRadius: 7,
+            marginTop: 8, padding: "8px 12px", borderRadius: 7,
             background: "rgba(0,0,0,0.25)", border: "1px solid rgba(245,158,11,0.12)",
-            display: "flex", alignItems: "center", gap: 16,
           }}>
-            <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 500 }}>
-              <span style={{ color: "#f59e0b", fontWeight: 700 }}>First time only — 2 steps:</span>
-              {"  "}
-              <span style={{ color: "var(--text-secondary)" }}>① Download the file above → save it to your project folder → double-click it.</span>
-              {"  "}
-              <span style={{ color: "var(--text-secondary)" }}>② Come back here → the green <strong>Worker Online</strong> bar appears → click <strong>Install Auto-Start</strong> and you&apos;re done forever.</span>
-            </span>
+            <div style={{ fontSize: 10, color: "#f59e0b", fontWeight: 700, marginBottom: 5 }}>
+              First time only — 2 steps:
+            </div>
+            <div style={{ display: "flex", gap: 20 }}>
+              {/* Windows */}
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, marginBottom: 3 }}>🪟 Windows</div>
+                <div style={{ fontSize: 10, color: "var(--text-secondary)", lineHeight: 1.7 }}>
+                  ① Download → save <code style={{ color: "#f59e0b" }}>start-agent.bat</code> to your project folder → double-click it<br/>
+                  ② Green bar appears → click <strong>Install Auto-Start</strong> → done forever ✓
+                </div>
+              </div>
+              <div style={{ width: 1, background: "rgba(255,255,255,0.06)", flexShrink: 0 }} />
+              {/* Mac */}
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, marginBottom: 3 }}>🍎 Mac</div>
+                <div style={{ fontSize: 10, color: "var(--text-secondary)", lineHeight: 1.7 }}>
+                  ① Download → save <code style={{ color: "#f59e0b" }}>start-agent.command</code> to your project folder → open Terminal → run: <code style={{ color: "#a78bfa" }}>chmod +x start-agent.command && ./start-agent.command</code><br/>
+                  ② Green bar appears → click <strong>Install Auto-Start</strong> → done forever ✓
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

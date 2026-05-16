@@ -1,19 +1,17 @@
 /**
- * Ottoflow Local Agent
- * Runs on port 7654. Lets the Vercel dashboard control the worker
- * and install itself to Windows startup — all via button clicks.
+ * Ottoflow Local Agent — Windows + Mac
+ * Runs on port 7654. Lets the Vercel dashboard start/restart
+ * the render worker and install auto-start — all via button clicks.
  */
 const http = require("http");
-const { spawn } = require("child_process");
+const { spawn, execSync } = require("child_process");
 const fs   = require("fs");
 const path = require("path");
 
-const PORT    = 7654;
-const PROJ    = __dirname;
-const STARTUP = path.join(
-  process.env.APPDATA || "",
-  "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
-);
+const PORT  = 7654;
+const PROJ  = __dirname;
+const IS_WIN = process.platform === "win32";
+const IS_MAC = process.platform === "darwin";
 
 let workerProc = null;
 
@@ -32,12 +30,54 @@ function startWorker() {
 }
 
 function installStartup() {
-  // Write a startup .bat that goes to the project folder and runs the agent
-  const bat = `@echo off\ncd /d "${PROJ}"\nstart /min "" node local-agent.js\n`;
-  const dest = path.join(STARTUP, "ottoflow-agent.bat");
-  fs.writeFileSync(dest, bat);
-  console.log("[agent] Installed to startup: " + dest);
-  return dest;
+  if (IS_WIN) {
+    // Windows — write .bat to shell:startup folder
+    const startupDir = path.join(
+      process.env.APPDATA || "",
+      "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
+    );
+    const bat  = `@echo off\r\ncd /d "${PROJ}"\r\nstart /min "" node local-agent.js\r\n`;
+    const dest = path.join(startupDir, "ottoflow-agent.bat");
+    fs.writeFileSync(dest, bat);
+    console.log("[agent] Installed to Windows startup: " + dest);
+    return { dest, platform: "windows" };
+  }
+
+  if (IS_MAC) {
+    // Mac — write LaunchAgent plist to ~/Library/LaunchAgents/
+    const launchDir = path.join(process.env.HOME || "", "Library", "LaunchAgents");
+    fs.mkdirSync(launchDir, { recursive: true });
+    const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ottoflow.agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${process.execPath}</string>
+    <string>${path.join(PROJ, "local-agent.js")}</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${PROJ}</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${path.join(PROJ, "agent.log")}</string>
+  <key>StandardErrorPath</key>
+  <string>${path.join(PROJ, "agent.log")}</string>
+</dict>
+</plist>`;
+    const dest = path.join(launchDir, "com.ottoflow.agent.plist");
+    fs.writeFileSync(dest, plist);
+    try { execSync(`launchctl load "${dest}"`); } catch {}
+    console.log("[agent] Installed to Mac LaunchAgents: " + dest);
+    return { dest, platform: "mac" };
+  }
+
+  throw new Error("Unsupported platform: " + process.platform);
 }
 
 // Auto-start worker on agent launch
@@ -59,9 +99,9 @@ http.createServer((req, res) => {
 
   if (req.url === "/install-startup") {
     try {
-      const dest = installStartup();
+      const result = installStartup();
       res.writeHead(200);
-      res.end(JSON.stringify({ ok: true, path: dest }));
+      res.end(JSON.stringify({ ok: true, ...result }));
     } catch (e) {
       res.writeHead(500);
       res.end(JSON.stringify({ ok: false, error: String(e) }));
@@ -71,7 +111,7 @@ http.createServer((req, res) => {
 
   if (req.url === "/ping") {
     res.writeHead(200);
-    res.end(JSON.stringify({ ok: true }));
+    res.end(JSON.stringify({ ok: true, platform: process.platform }));
     return;
   }
 
