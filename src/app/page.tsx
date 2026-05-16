@@ -21,6 +21,7 @@ type Tier   = "basic" | "advanced";
 
 interface LogEntry { id: number; ts: string; agent: string; message: string; level: string; }
 interface QueueRow { rowIndex: number; topic: string; style: string; status: string; avatarUrl?: string; }
+interface DbJob { id: string; topic: string; template: string; status: string; error?: string; output_link?: string; duration_ms?: number; started_at?: string; }
 interface Services { anthropic: boolean; pexels: boolean; telegram: boolean; sheets: boolean; n8n: boolean; ffmpeg: boolean; remotion: boolean; branding: boolean; jamendo: boolean; }
 
 // ─── Pipeline definition ──────────────────────────────────────
@@ -260,46 +261,54 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   const [previewSlug,   setPreviewSlug]   = useState<string | undefined>(undefined);
   const [renderingRows, setRenderingRows] = useState<Set<number>>(new Set());
   const [stuckCount,    setStuckCount]    = useState(0);
+  const [activeJobs,    setActiveJobs]    = useState<DbJob[]>([]);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const es = new EventSource("/api/pipeline-events");
-    es.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type === "init") {
-          setPipeStatus(msg.status); setActiveAgent(msg.agent || "");
-          setCurrentTopic(msg.topic || ""); setProgress(msg.progress || 0);
-          setLogs(msg.logs || []);
-        } else if (msg.type === "log") {
-          setLogs((prev) => [...prev.slice(-199), msg.entry]);
-          const incoming = msg.entry.agent as string;
-          setActiveAgent((prev) => {
-            if (prev && prev !== incoming) {
-              setDoneAgents((d) => new Set([...d, prev]));
-            }
-            return incoming;
-          });
-        } else if (msg.type === "status") {
-          if (msg.status) {
-            setPipeStatus((prev) => {
-              if (msg.status === "running" && prev !== "running") {
-                setDoneAgents(new Set());
-                toast.loading("Pipeline running…", { id: "pipeline" });
-              } else if (msg.status === "done") {
-                toast.dismiss("pipeline"); toast.success("Pipeline complete!");
-              } else if (msg.status === "error") {
-                toast.dismiss("pipeline"); toast.error("Pipeline error — check logs");
-              }
-              return msg.status;
+    let es: EventSource;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+
+    const connect = () => {
+      es = new EventSource("/api/pipeline-events");
+      es.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === "init") {
+            setPipeStatus(msg.status); setActiveAgent(msg.agent || "");
+            setCurrentTopic(msg.topic || ""); setProgress(msg.progress || 0);
+            setLogs(msg.logs || []);
+          } else if (msg.type === "log") {
+            setLogs((prev) => [...prev.slice(-199), msg.entry]);
+            const incoming = msg.entry.agent as string;
+            setActiveAgent((prev) => {
+              if (prev && prev !== incoming) setDoneAgents((d) => new Set([...d, prev]));
+              return incoming;
             });
+          } else if (msg.type === "status") {
+            if (msg.status) {
+              setPipeStatus((prev) => {
+                if (msg.status === "running" && prev !== "running") {
+                  setDoneAgents(new Set());
+                  toast.loading("Pipeline running…", { id: "pipeline" });
+                } else if (msg.status === "done") {
+                  toast.dismiss("pipeline"); toast.success("Pipeline complete!");
+                } else if (msg.status === "error") {
+                  toast.dismiss("pipeline"); toast.error("Pipeline error — check logs");
+                }
+                return msg.status;
+              });
+            }
+            if (msg.currentTopic !== undefined) setCurrentTopic(msg.currentTopic);
+            if (msg.progress     !== undefined) setProgress(msg.progress);
           }
-          if (msg.currentTopic !== undefined) setCurrentTopic(msg.currentTopic);
-          if (msg.progress !== undefined) setProgress(msg.progress);
-        }
-      } catch {}
+        } catch {}
+      };
+      // Auto-reconnect after Vercel's 60s SSE limit cuts the connection
+      es.onerror = () => { es.close(); reconnectTimer = setTimeout(connect, 3000); };
     };
-    return () => es.close();
+
+    connect();
+    return () => { es?.close(); clearTimeout(reconnectTimer); };
   }, []);
 
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
@@ -322,6 +331,26 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     };
     check();
     const t = setInterval(check, 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Poll DB jobs every 5s — shows real render status independent of SSE
+  useEffect(() => {
+    const poll = async () => {
+      const r = await fetch("/api/jobs?limit=10").catch(() => null);
+      if (!r?.ok) return;
+      const d = await r.json();
+      const jobs: DbJob[] = d.jobs ?? [];
+      const active = jobs.filter(j => ["pending","processing"].includes(j.status));
+      setActiveJobs(active);
+      // If DB shows processing but SSE shows idle, sync the status pill
+      if (active.length > 0) {
+        setPipeStatus(prev => prev === "idle" ? "running" : prev);
+        if (active[0]) setCurrentTopic(prev => prev || active[0].topic);
+      }
+    };
+    poll();
+    const t = setInterval(poll, 5000);
     return () => clearInterval(t);
   }, []);
 
@@ -514,6 +543,23 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
               </motion.div>
             )}
           </AnimatePresence>
+
+          {/* Active DB jobs — shows real render progress even if SSE is reconnecting */}
+          {activeJobs.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {activeJobs.map(job => (
+                <div key={job.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 14px", borderRadius: 9, background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)" }}>
+                  <Loader2 size={12} style={{ animation: "spin 1s linear infinite", color: "#a78bfa", flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, color: "#a78bfa", fontWeight: 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {job.status === "processing" ? "Rendering:" : "Queued:"} {displayTopic(job.topic)}
+                  </span>
+                  <span style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>
+                    {job.template} · {job.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Stuck jobs warning */}
           {stuckCount > 0 && (

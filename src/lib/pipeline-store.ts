@@ -1,7 +1,9 @@
 /**
- * Global pipeline event store — shared between pipeline API and SSE route.
- * Works because Next.js dev server runs all routes in the same Node process.
+ * Global pipeline event store.
+ * In-memory for local dev (same process). Also writes to Redis so the
+ * Vercel SSE endpoint and local worker share state across machines.
  */
+import { rSetStatus, rPushLog, rClearLogs } from "./pipeline-redis";
 
 export type LogLevel = "info" | "success" | "error" | "warning" | "agent";
 
@@ -43,6 +45,7 @@ export function emitLog(agent: string, message: string, level: LogLevel = "info"
   if (store.logs.length > 300) store.logs.shift();
   store.activeAgent = agent;
   store.listeners.forEach((fn) => fn(entry));
+  rPushLog(agent, message, level).catch(() => {});
 }
 
 export function setStatus(status: PipelineStatus, topic?: string, progress?: number) {
@@ -52,12 +55,14 @@ export function setStatus(status: PipelineStatus, topic?: string, progress?: num
   store.statusListeners.forEach((fn) =>
     fn({ status: store.status, currentTopic: store.currentTopic, progress: store.progress })
   );
+  rSetStatus(status, store.currentTopic, store.progress).catch(() => {});
 }
 
 export function clearLogs() {
   store.logs = [];
   store.activeAgent = "";
   store.progress = 0;
+  rClearLogs().catch(() => {});
 }
 
 /** Map a console.log line (from orchestrator) to an agent name. */
