@@ -262,6 +262,8 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   const [renderingRows, setRenderingRows] = useState<Set<number>>(new Set());
   const [stuckCount,    setStuckCount]    = useState(0);
   const [activeJobs,    setActiveJobs]    = useState<DbJob[]>([]);
+  const [workerOnline,  setWorkerOnline]  = useState<boolean | null>(null);
+  const [workerStarting, setWorkerStarting] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -334,6 +336,17 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     return () => clearInterval(t);
   }, []);
 
+  // Poll worker status every 10s
+  useEffect(() => {
+    const check = async () => {
+      const r = await fetch("/api/worker-status").catch(() => null);
+      if (r?.ok) { const d = await r.json(); setWorkerOnline(d.online); }
+    };
+    check();
+    const t = setInterval(check, 10_000);
+    return () => clearInterval(t);
+  }, []);
+
   // Poll DB jobs every 5s — shows real render status independent of SSE
   useEffect(() => {
     const poll = async () => {
@@ -373,6 +386,27 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     if (res?.ok) toast.success(`Queued: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
     else         toast.error(`Failed: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
     fetchQueue();
+  };
+
+  const startWorker = async () => {
+    setWorkerStarting(true);
+    const r = await fetch("/api/start-worker", { method: "POST" }).catch(() => null);
+    if (!r) { toast.error("Could not reach server"); setWorkerStarting(false); return; }
+    const d = await r.json().catch(() => ({}));
+    if (d.vercel) {
+      toast.info("On Vercel: deploy to Railway or run `npm run worker` locally", { duration: 8000 });
+      setWorkerStarting(false);
+    } else if (d.ok) {
+      toast.success("Worker starting… ready in ~5 seconds");
+      setTimeout(async () => {
+        const s = await fetch("/api/worker-status").catch(() => null);
+        if (s?.ok) { const sd = await s.json(); setWorkerOnline(sd.online); }
+        setWorkerStarting(false);
+      }, 6000);
+    } else {
+      toast.error(d.message || "Failed to start worker");
+      setWorkerStarting(false);
+    }
   };
 
   const agents = tier === "advanced" ? V2_PIPELINE_AGENTS : PIPELINE_AGENTS;
@@ -434,6 +468,51 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
           </button>
         </div>
       </div>
+
+      {/* ── WORKER STATUS BANNER ── */}
+      {workerOnline === false && (
+        <div style={{
+          padding: "9px 20px", flexShrink: 0,
+          background: "rgba(245,158,11,0.07)",
+          borderBottom: "1px solid rgba(245,158,11,0.18)",
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#f59e0b", flexShrink: 0, display: "inline-block" }} />
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#f59e0b" }}>Worker Offline</span>
+            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+              — Click <strong style={{ color: "var(--text-secondary)" }}>Start Worker</strong> before rendering, or jobs will stay queued.
+            </span>
+          </div>
+          <button
+            onClick={startWorker}
+            disabled={workerStarting}
+            style={{
+              padding: "6px 13px", borderRadius: 7, flexShrink: 0,
+              border: "1px solid rgba(245,158,11,0.4)",
+              background: "rgba(245,158,11,0.12)", color: "#f59e0b",
+              fontSize: 11, fontWeight: 700, cursor: workerStarting ? "not-allowed" : "pointer",
+              fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5,
+              opacity: workerStarting ? 0.6 : 1, transition: "opacity 0.15s",
+            }}
+          >
+            {workerStarting
+              ? <><Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} /> Starting…</>
+              : <><Play size={11} fill="currentColor" /> Start Worker</>}
+          </button>
+        </div>
+      )}
+      {workerOnline === true && (
+        <div style={{
+          padding: "5px 20px", flexShrink: 0,
+          background: "rgba(16,185,129,0.05)",
+          borderBottom: "1px solid rgba(16,185,129,0.12)",
+          display: "flex", alignItems: "center", gap: 6,
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981", flexShrink: 0, display: "inline-block" }} />
+          <span style={{ fontSize: 10, fontWeight: 600, color: "#10b981", letterSpacing: "0.4px" }}>WORKER ONLINE — Ready to render</span>
+        </div>
+      )}
 
       {/* ── PIPELINE STRIP ── */}
       <div style={{
