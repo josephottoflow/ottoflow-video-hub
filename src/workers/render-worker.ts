@@ -11,14 +11,54 @@
  */
 
 import "dotenv/config";
+import * as http from "http";
+import * as fs   from "fs";
+import * as path from "path";
 import { Worker, Job } from "bullmq";
 import { redisConnection, RENDER_QUEUE, RenderJobData } from "../lib/queue";
 import { PipelineOrchestrator }   from "../agents/pipeline/orchestrator";
 import { PipelineOrchestratorV2 } from "../agents/pipeline/orchestrator-v2";
 import { updateJobStatus, markStuckJobsError, getJob } from "../lib/db";
 import { ensureBrowser } from "@remotion/renderer";
+import { emitLog, inferAgent, inferLevel } from "../lib/pipeline-store";
 
 const CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
+
+// Serve public/ on localhost:3000 so Remotion Chrome can fetch background files.
+// Falls back silently if Next.js dev server already holds the port.
+function startStaticServer() {
+  const publicDir = path.resolve("public");
+  const port      = parseInt(process.env.PORT || "3000", 10);
+  const MIME: Record<string, string> = {
+    ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp", ".json": "application/json",
+  };
+
+  const server = http.createServer((req, res) => {
+    const relPath = decodeURIComponent((req.url || "/").split("?")[0]);
+    const filePath = path.join(publicDir, relPath);
+    if (!filePath.startsWith(publicDir)) { res.writeHead(403); res.end(); return; }
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      res.writeHead(404); res.end("Not found"); return;
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
+    fs.createReadStream(filePath).pipe(res);
+  });
+
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      console.log(`[worker] Port ${port} in use — Next.js is already serving public/ ✓`);
+    } else {
+      console.error("[worker] Static server error:", err.message);
+    }
+  });
+
+  server.listen(port, "127.0.0.1", () =>
+    console.log(`[worker] Static file server → http://localhost:${port}/ (serves public/)`)
+  );
+}
 
 async function checkRedis(): Promise<void> {
   try {
@@ -93,7 +133,16 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
 }
 
 async function startup() {
+  startStaticServer();
   await checkRedis();
+
+  // Forward console.log to Redis so Vercel SSE shows live progress
+  const _origLog = console.log.bind(console);
+  console.log = (...args: unknown[]) => {
+    const msg = args.map(String).join(" ");
+    _origLog(msg);
+    emitLog(inferAgent(msg), msg, inferLevel(msg));
+  };
 
   // Ensure Chrome Headless Shell is available (downloads if missing, fast if cached)
   try {
