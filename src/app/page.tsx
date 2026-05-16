@@ -583,34 +583,71 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
       {/* ── WORKER STATUS BANNER ── */}
       {workerOnline === false && (
         <div style={{
-          padding: "9px 20px", flexShrink: 0,
+          padding: "10px 20px", flexShrink: 0,
           background: "rgba(245,158,11,0.07)",
           borderBottom: "1px solid rgba(245,158,11,0.18)",
-          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#f59e0b", flexShrink: 0, display: "inline-block" }} />
-            <span style={{ fontSize: 12, fontWeight: 700, color: "#f59e0b" }}>Worker Offline</span>
-            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-              — Click <strong style={{ color: "var(--text-secondary)" }}>Start Worker</strong> before rendering, or jobs will stay queued.
+          {/* Row 1: status + buttons */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#f59e0b", flexShrink: 0, display: "inline-block" }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#f59e0b" }}>Worker Offline</span>
+              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>— Renders will queue but won&apos;t process until the worker starts.</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+              {/* Download button */}
+              <button
+                onClick={() => {
+                  const bat = `@echo off\r\ntitle Ottoflow Agent Setup\r\ncd /d "%~dp0"\r\necho.\r\necho  ============================================\r\necho   Ottoflow - Starting Worker Agent...\r\necho   This window will close automatically.\r\necho  ============================================\r\necho.\r\nnode local-agent.js\r\n`;
+                  const blob = new Blob([bat], { type: "application/octet-stream" });
+                  const a = document.createElement("a");
+                  a.href = URL.createObjectURL(blob);
+                  a.download = "start-agent.bat";
+                  a.click();
+                }}
+                style={{
+                  padding: "6px 13px", borderRadius: 7,
+                  border: "1px solid rgba(245,158,11,0.4)",
+                  background: "rgba(245,158,11,0.12)", color: "#f59e0b",
+                  fontSize: 11, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5,
+                }}
+              >
+                ⬇ Download Setup File
+              </button>
+              {/* Start button (if agent already running) */}
+              <button
+                onClick={startWorker}
+                disabled={workerStarting}
+                style={{
+                  padding: "6px 13px", borderRadius: 7,
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.05)", color: "var(--text-muted)",
+                  fontSize: 11, fontWeight: 700, cursor: workerStarting ? "not-allowed" : "pointer",
+                  fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5,
+                  opacity: workerStarting ? 0.6 : 1,
+                }}
+              >
+                {workerStarting
+                  ? <><Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} /> Starting…</>
+                  : <><Play size={11} fill="currentColor" /> Start Worker</>}
+              </button>
+            </div>
+          </div>
+          {/* Row 2: 2-step note */}
+          <div style={{
+            marginTop: 8, padding: "7px 12px", borderRadius: 7,
+            background: "rgba(0,0,0,0.25)", border: "1px solid rgba(245,158,11,0.12)",
+            display: "flex", alignItems: "center", gap: 16,
+          }}>
+            <span style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 500 }}>
+              <span style={{ color: "#f59e0b", fontWeight: 700 }}>First time only — 2 steps:</span>
+              {"  "}
+              <span style={{ color: "var(--text-secondary)" }}>① Download the file above → save it to your project folder → double-click it.</span>
+              {"  "}
+              <span style={{ color: "var(--text-secondary)" }}>② Come back here → the green <strong>Worker Online</strong> bar appears → click <strong>Install Auto-Start</strong> and you&apos;re done forever.</span>
             </span>
           </div>
-          <button
-            onClick={startWorker}
-            disabled={workerStarting}
-            style={{
-              padding: "6px 13px", borderRadius: 7, flexShrink: 0,
-              border: "1px solid rgba(245,158,11,0.4)",
-              background: "rgba(245,158,11,0.12)", color: "#f59e0b",
-              fontSize: 11, fontWeight: 700, cursor: workerStarting ? "not-allowed" : "pointer",
-              fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5,
-              opacity: workerStarting ? 0.6 : 1, transition: "opacity 0.15s",
-            }}
-          >
-            {workerStarting
-              ? <><Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} /> Starting…</>
-              : <><Play size={11} fill="currentColor" /> How to Start Worker</>}
-          </button>
         </div>
       )}
       {workerOnline === true && (
