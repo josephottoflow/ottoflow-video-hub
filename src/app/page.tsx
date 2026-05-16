@@ -473,6 +473,21 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
           <div style={{ padding: "3px 10px", borderRadius: 6, background: tier === "advanced" ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.05)", border: `1px solid ${tier === "advanced" ? "rgba(99,102,241,0.3)" : "var(--border)"}`, fontSize: 10, fontWeight: 700, color: tier === "advanced" ? "#a78bfa" : "var(--text-muted)" }}>
             {tier === "advanced" ? "⚡ Advanced" : "◎ Basic"}
           </div>
+          <button
+            onClick={killJobs}
+            title="Kill all stuck/processing jobs and reset to idle"
+            style={{
+              display: "flex", alignItems: "center", gap: 5,
+              padding: "6px 12px", borderRadius: 7, cursor: "pointer",
+              border: "1px solid rgba(244,63,94,0.35)",
+              background: activeJobs.length > 0 ? "rgba(244,63,94,0.12)" : "rgba(255,255,255,0.03)",
+              color: activeJobs.length > 0 ? "#f43f5e" : "var(--text-muted)",
+              fontSize: 11, fontWeight: 700, fontFamily: "inherit",
+              transition: "all 0.15s",
+            }}
+          >
+            <XCircle size={12} /> Reset Jobs
+          </button>
           <button className="btn btn-primary btn-sm" onClick={runPipeline} disabled={running} style={{ gap: 5 }}>
             {running
               ? <><Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Running…</>
@@ -654,20 +669,18 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                     <span style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>
                       {startedAt ? `${minAgo}m ago` : job.template}
                     </span>
-                    {job.status === "processing" && (
-                      <button
-                        onClick={killJobs}
-                        title="Kill this render and reset queue"
-                        style={{
-                          padding: "2px 9px", borderRadius: 5, flexShrink: 0,
-                          border: "1px solid rgba(244,63,94,0.35)",
-                          background: "rgba(244,63,94,0.1)", color: "#f43f5e",
-                          fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                        }}
-                      >
-                        Kill
-                      </button>
-                    )}
+                    <button
+                      onClick={killJobs}
+                      title="Kill this render and reset queue"
+                      style={{
+                        padding: "2px 9px", borderRadius: 5, flexShrink: 0,
+                        border: "1px solid rgba(244,63,94,0.35)",
+                        background: "rgba(244,63,94,0.1)", color: "#f43f5e",
+                        fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                      }}
+                    >
+                      Kill
+                    </button>
                   </div>
                 );
               })}
