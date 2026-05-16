@@ -388,6 +388,18 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     fetchQueue();
   };
 
+  const killJobs = async () => {
+    const r = await fetch("/api/jobs/reset", { method: "POST" }).catch(() => null);
+    if (r?.ok) {
+      const d = await r.json();
+      toast.success(`Killed ${d.killed} job(s) — queue cleared`);
+      setActiveJobs([]);
+      setPipeStatus("idle");
+    } else {
+      toast.error("Failed to kill jobs — check DB connection");
+    }
+  };
+
   const startWorker = async () => {
     setWorkerStarting(true);
     const r = await fetch("/api/start-worker", { method: "POST" }).catch(() => null);
@@ -626,29 +638,58 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
           {/* Active DB jobs — shows real render progress even if SSE is reconnecting */}
           {activeJobs.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {activeJobs.map(job => (
-                <div key={job.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 14px", borderRadius: 9, background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)" }}>
-                  <Loader2 size={12} style={{ animation: "spin 1s linear infinite", color: "#a78bfa", flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, color: "#a78bfa", fontWeight: 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {job.status === "processing" ? "Rendering:" : "Queued:"} {displayTopic(job.topic)}
-                  </span>
-                  <span style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>
-                    {job.template} · {job.status}
-                  </span>
-                </div>
-              ))}
+              {activeJobs.map(job => {
+                const startedAt = job.started_at ? new Date(job.started_at) : null;
+                const minAgo    = startedAt ? Math.floor((Date.now() - startedAt.getTime()) / 60000) : 0;
+                const isStuck   = job.status === "processing" && minAgo >= 5;
+                const color     = isStuck ? "#f43f5e" : "#a78bfa";
+                const bg        = isStuck ? "rgba(244,63,94,0.08)"   : "rgba(99,102,241,0.08)";
+                const border    = isStuck ? "rgba(244,63,94,0.25)"   : "rgba(99,102,241,0.2)";
+                return (
+                  <div key={job.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 14px", borderRadius: 9, background: bg, border: `1px solid ${border}` }}>
+                    <Loader2 size={12} style={{ animation: "spin 1s linear infinite", color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 12, color, fontWeight: 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {isStuck ? "⚠ Stuck:" : job.status === "processing" ? "Rendering:" : "Queued:"} {displayTopic(job.topic)}
+                    </span>
+                    <span style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>
+                      {startedAt ? `${minAgo}m ago` : job.template}
+                    </span>
+                    {job.status === "processing" && (
+                      <button
+                        onClick={killJobs}
+                        title="Kill this render and reset queue"
+                        style={{
+                          padding: "2px 9px", borderRadius: 5, flexShrink: 0,
+                          border: "1px solid rgba(244,63,94,0.35)",
+                          background: "rgba(244,63,94,0.1)", color: "#f43f5e",
+                          fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                        }}
+                      >
+                        Kill
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
-          {/* Stuck jobs warning */}
+          {/* Stuck jobs warning (>15 min — DB-confirmed) */}
           {stuckCount > 0 && (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 14px", borderRadius: 9, background: "rgba(244,63,94,0.1)", border: "1px solid rgba(244,63,94,0.3)" }}>
               <span style={{ fontSize: 12, color: "#f43f5e", fontWeight: 600 }}>
-                {stuckCount} job{stuckCount > 1 ? "s" : ""} stuck in Processing for &gt;15 min
+                {stuckCount} job{stuckCount > 1 ? "s" : ""} stuck &gt;15 min
               </span>
-              <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                Restart <code style={{ background: "rgba(255,255,255,0.06)", padding: "1px 5px", borderRadius: 4 }}>npm run worker</code> — it will auto-clean on startup
-              </span>
+              <button
+                onClick={killJobs}
+                style={{
+                  padding: "4px 12px", borderRadius: 6, border: "1px solid rgba(244,63,94,0.4)",
+                  background: "rgba(244,63,94,0.12)", color: "#f43f5e",
+                  fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                Reset Now
+              </button>
             </div>
           )}
 
@@ -684,10 +725,22 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                 if (queue.length === 0) {
                   return <div style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", padding: "24px 0" }}>No content in queue</div>;
                 }
-                const activeRows  = queue.filter(r => ["Processing","Rendering","Exporting"].includes(r.status));
-                const pendingRows = queue.filter(r => r.status === "Pending");
-                const errorRows   = queue.filter(r => r.status === "Error");
-                const doneRows    = queue.filter(r => ["Done","Complete"].includes(r.status)).sort((a, b) => b.rowIndex - a.rowIndex);
+
+                // Merge DB job status into queue rows so "processing" jobs show immediately
+                // even before Google Sheets column is updated by the orchestrator
+                const dbStatusByTopic = Object.fromEntries(
+                  activeJobs.map(j => [j.topic.toLowerCase().trim(), j.status])
+                );
+                const mergedQueue = queue.map(r => {
+                  const dbStatus = dbStatusByTopic[r.topic.toLowerCase().trim()];
+                  if (dbStatus === "processing") return { ...r, status: "Processing" };
+                  return r;
+                });
+
+                const activeRows  = mergedQueue.filter(r => ["Processing","Rendering","Exporting"].includes(r.status));
+                const pendingRows = mergedQueue.filter(r => r.status === "Pending");
+                const errorRows   = mergedQueue.filter(r => r.status === "Error");
+                const doneRows    = mergedQueue.filter(r => ["Done","Complete"].includes(r.status)).sort((a, b) => b.rowIndex - a.rowIndex);
 
                 const groups: { label: string; icon: string; rows: QueueRow[]; dim?: boolean }[] = [
                   { label: "Active",  icon: "🔄", rows: activeRows  },
@@ -705,8 +758,9 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                 };
 
                 const renderRow_ = (row: QueueRow) => {
-                  const isRendering = renderingRows.has(row.rowIndex);
-                  const isDone      = ["Done","Complete"].includes(row.status);
+                  const isRendering  = renderingRows.has(row.rowIndex);
+                  const isProcessing = row.status === "Processing";
+                  const isDone       = ["Done","Complete"].includes(row.status);
                   const slug        = slugOf(row.topic);
                   return (
                     <div key={row.rowIndex} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 12px", borderBottom: "1px solid var(--border)", gap: 8 }}>
@@ -739,6 +793,21 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                               <FolderOpen size={11} />
                             </button>
                           </>
+                        ) : isProcessing ? (
+                          <button
+                            onClick={killJobs}
+                            title="Kill this render"
+                            style={{
+                              display: "flex", alignItems: "center", gap: 3,
+                              padding: "3px 8px", borderRadius: 6,
+                              border: "1px solid rgba(244,63,94,0.35)",
+                              background: "rgba(244,63,94,0.1)", color: "#f43f5e",
+                              cursor: "pointer", fontSize: 10, fontWeight: 700,
+                              fontFamily: "inherit", whiteSpace: "nowrap",
+                            }}
+                          >
+                            <XCircle size={9} /> Kill
+                          </button>
                         ) : (
                           <button
                             onClick={() => renderRow(row)}
