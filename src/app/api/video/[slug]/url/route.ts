@@ -29,7 +29,7 @@ export async function GET(
   try {
     const jobs = await listJobs(200);
     const job  = jobs.find(j => j.topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") === safe);
-    if (job?.output_link) {
+    if (job?.output_link?.startsWith("http")) {
       return NextResponse.json({ source: "drive", url: job.output_link });
     }
   } catch { /* DB unavailable */ }

@@ -1,16 +1,30 @@
 import { google } from "googleapis";
+import { OAuth2Client } from "google-auth-library";
 import * as fs from "fs";
 import * as path from "path";
 
+const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
+
 function getDriveClient() {
+  // Prefer service account (private key set)
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   const key   = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
-  if (!email || !key) return null;
+  if (email && key) {
+    const auth = new google.auth.JWT(email, undefined, key, SCOPES);
+    return google.drive({ version: "v3", auth });
+  }
 
-  const auth = new google.auth.JWT(email, undefined, key, [
-    "https://www.googleapis.com/auth/drive.file",
-  ]);
-  return google.drive({ version: "v3", auth });
+  // OAuth2 fallback (refresh token set — works without service account key)
+  const clientId     = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+  if (clientId && clientSecret && refreshToken) {
+    const oauth2 = new OAuth2Client(clientId, clientSecret, "http://localhost:3333");
+    oauth2.setCredentials({ refresh_token: refreshToken });
+    return google.drive({ version: "v3", auth: oauth2 });
+  }
+
+  return null;
 }
 
 export async function uploadVideoToDrive(

@@ -8,14 +8,19 @@ const { spawn, execSync } = require("child_process");
 const fs   = require("fs");
 const path = require("path");
 
-const PORT  = 7654;
-const PROJ  = __dirname;
+const PORT   = 7654;
+const PROJ   = __dirname;
 const IS_WIN = process.platform === "win32";
 const IS_MAC = process.platform === "darwin";
 
 const LOG_FILE = path.join(PROJ, "worker.log");
 let lastError  = "";
 let workerProc = null;
+
+// Guards against double-restart races:
+// intentional = we killed the worker ourselves, suppress the exit-handler restart
+let intentionalKill  = false;
+let restartScheduled = false;
 
 function log(line) {
   const ts  = new Date().toISOString().slice(11, 19);
@@ -24,38 +29,77 @@ function log(line) {
   try { fs.appendFileSync(LOG_FILE, out); } catch {}
 }
 
+function killWorker() {
+  if (!workerProc) return;
+  intentionalKill = true;
+  try {
+    // On Windows, kill() with no signal sends SIGTERM to the process tree via taskkill
+    if (IS_WIN && workerProc.pid) {
+      try { execSync(`taskkill /pid ${workerProc.pid} /t /f`, { stdio: "ignore" }); } catch {}
+    } else {
+      workerProc.kill("SIGTERM");
+    }
+  } catch {}
+  workerProc = null;
+}
+
 function startWorker() {
-  if (workerProc && !workerProc.killed) {
-    try { process.kill(-workerProc.pid); } catch {}
+  // Prevent concurrent starts
+  if (restartScheduled) {
+    clearTimeout(restartScheduled);
+    restartScheduled = false;
   }
+
+  killWorker();
+
   // Trim log file to last 200 lines on each start
   try {
     const lines = fs.readFileSync(LOG_FILE, "utf8").split("\n");
     if (lines.length > 200) fs.writeFileSync(LOG_FILE, lines.slice(-200).join("\n"));
   } catch {}
 
-  workerProc = spawn("npm", ["run", "worker"], {
+  intentionalKill = false; // reset before spawning so exit handler works normally
+
+  const proc = spawn("npm", ["run", "worker"], {
     cwd:   PROJ,
     shell: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  workerProc.stdout?.on("data", d => { const t = d.toString().trim(); if (t) log("[worker] " + t); });
-  workerProc.stderr?.on("data", d => {
+  workerProc = proc;
+
+  proc.stdout?.on("data", d => { const t = d.toString().trim(); if (t) log("[worker] " + t); });
+  proc.stderr?.on("data", d => {
     const t = d.toString().trim();
     if (t) { log("[worker-err] " + t); lastError = t.slice(0, 300); }
   });
-  workerProc.on("exit", (code) => {
-    log(`[agent] Worker exited (code ${code}) — will restart in 5s`);
-    setTimeout(startWorker, 5000);
+
+  proc.on("exit", (code) => {
+    if (workerProc === proc) workerProc = null; // clear ref only if it's still us
+
+    if (intentionalKill) {
+      // We killed it ourselves — startWorker() handles the next spawn, don't double-restart
+      intentionalKill = false;
+      return;
+    }
+
+    log(`[agent] Worker exited unexpectedly (code ${code}) — restarting in 5s`);
+    restartScheduled = setTimeout(() => {
+      restartScheduled = false;
+      startWorker();
+    }, 5000);
   });
 
-  log("[agent] Worker started (pid " + workerProc.pid + ")");
+  log("[agent] Worker started (pid " + proc.pid + ")");
+}
+
+function isWorkerAlive() {
+  if (!workerProc || !workerProc.pid) return false;
+  try { process.kill(workerProc.pid, 0); return true; } catch { return false; }
 }
 
 function installStartup() {
   if (IS_WIN) {
-    // Windows — write .bat to shell:startup folder
     const startupDir = path.join(
       process.env.APPDATA || "",
       "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
@@ -68,7 +112,6 @@ function installStartup() {
   }
 
   if (IS_MAC) {
-    // Mac — write LaunchAgent plist to ~/Library/LaunchAgents/
     const launchDir = path.join(process.env.HOME || "", "Library", "LaunchAgents");
     fs.mkdirSync(launchDir, { recursive: true });
     const plist = `<?xml version="1.0" encoding="UTF-8"?>
@@ -134,18 +177,15 @@ http.createServer((req, res) => {
   }
 
   if (req.url === "/worker-status") {
-    let alive = false;
-    if (workerProc) {
-      try { process.kill(workerProc.pid, 0); alive = true; } catch { alive = false; }
-    }
-    // Auto-restart if crashed
-    if (!alive) {
-      console.log("[agent] Worker was dead — auto-restarting...");
+    const alive = isWorkerAlive();
+    // If dead and no restart already scheduled, kick one off
+    if (!alive && !restartScheduled) {
+      log("[agent] Worker was dead on status-check — restarting...");
       startWorker();
-      alive = true;
     }
     res.writeHead(200);
-    res.end(JSON.stringify({ ok: true, workerAlive: alive, pid: workerProc?.pid }));
+    // Report actual state — don't lie that it's alive while it's still starting
+    res.end(JSON.stringify({ ok: true, workerAlive: alive, pid: workerProc?.pid ?? null }));
     return;
   }
 
