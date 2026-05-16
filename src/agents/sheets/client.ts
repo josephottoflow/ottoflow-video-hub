@@ -134,7 +134,7 @@ export class SheetsClient {
     let auth: Auth.GoogleAuth | OAuth2Client;
 
     if (config.google.serviceAccountEmail && config.google.privateKey) {
-      // Service account path (original)
+      // Service account path
       auth = new google.auth.GoogleAuth({
         credentials: {
           client_email: config.google.serviceAccountEmail,
@@ -146,8 +146,19 @@ export class SheetsClient {
       return;
     }
 
+    // OAuth2 via env vars (Vercel-friendly — no local file needed)
+    const clientId     = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+    if (clientId && clientSecret && refreshToken) {
+      const oauth2Client = new OAuth2Client(clientId, clientSecret, "http://localhost:3333");
+      oauth2Client.setCredentials({ refresh_token: refreshToken });
+      this.sheets = google.sheets({ version: "v4", auth: oauth2Client });
+      return;
+    }
+
     if (fs.existsSync(CLIENT_SECRET_PATH)) {
-      // OAuth2 path — uses downloaded client_secret.json
+      // OAuth2 path — uses downloaded client_secret.json (local dev)
       const oauth2Client = await this.getOAuth2Client();
       this.sheets = google.sheets({ version: "v4", auth: oauth2Client });
       return;
@@ -156,7 +167,8 @@ export class SheetsClient {
     throw new Error(
       "No Google credentials found.\n" +
       "Option A: Set GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY in .env\n" +
-      "Option B: Download OAuth2 client secret JSON and save as client_secret.json in project root"
+      "Option B: Set GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET + GOOGLE_REFRESH_TOKEN in .env\n" +
+      "Option C: Save client_secret.json in project root and run: npx tsx src/cli/auth-google.ts"
     );
   }
 
