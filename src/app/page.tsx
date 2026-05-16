@@ -555,45 +555,81 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                   <RefreshCw size={10} /> Refresh
                 </button>
               </div>
-              <div style={{ maxHeight: 380, overflowY: "auto" }}>
-                {queue.length === 0 ? (
-                  <div style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", padding: "24px 0" }}>No content in queue</div>
-                ) : (
-                  queue.slice(0, 20).map((row) => {
-                    const isRendering = renderingRows.has(row.rowIndex);
-                    const isDone      = ["Done","Complete"].includes(row.status);
-                    return (
-                      <div key={row.rowIndex} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 12px", borderBottom: "1px solid var(--border)", gap: 8 }}>
-                        <span style={{ fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                          {displayTopic(row.topic)}
-                        </span>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                          <StatusPill status={row.status} />
-                          {!isDone && (
-                            <button
-                              onClick={() => renderRow(row)}
-                              disabled={isRendering}
-                              style={{
-                                display: "flex", alignItems: "center", gap: 3,
-                                padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)",
-                                background: isRendering ? "var(--bg)" : "var(--primary-light)",
-                                color: isRendering ? "var(--text-muted)" : "var(--accent)",
-                                cursor: isRendering ? "not-allowed" : "pointer",
-                                fontSize: 10, fontWeight: 700, fontFamily: "inherit",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {isRendering
-                                ? <><Loader2 size={9} style={{ animation: "spin 1s linear infinite" }} /> …</>
-                                : <><Play size={9} fill="currentColor" /> Render</>}
-                            </button>
-                          )}
-                        </div>
+              {(() => {
+                if (queue.length === 0) {
+                  return <div style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "center", padding: "24px 0" }}>No content in queue</div>;
+                }
+                const activeRows  = queue.filter(r => ["Processing","Rendering","Exporting"].includes(r.status));
+                const pendingRows = queue.filter(r => r.status === "Pending");
+                const errorRows   = queue.filter(r => r.status === "Error");
+                const doneRows    = queue.filter(r => ["Done","Complete"].includes(r.status)).sort((a, b) => b.rowIndex - a.rowIndex);
+
+                const groups: { label: string; icon: string; rows: QueueRow[]; dim?: boolean }[] = [
+                  { label: "Active",  icon: "🔄", rows: activeRows  },
+                  { label: "Pending", icon: "⏳", rows: pendingRows },
+                  { label: "Error",   icon: "❌", rows: errorRows   },
+                  { label: "Done",    icon: "✅", rows: doneRows, dim: true },
+                ].filter(g => g.rows.length > 0);
+
+                const renderRow_ = (row: QueueRow) => {
+                  const isRendering = renderingRows.has(row.rowIndex);
+                  const isDone      = ["Done","Complete"].includes(row.status);
+                  return (
+                    <div key={row.rowIndex} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 12px", borderBottom: "1px solid var(--border)", gap: 8 }}>
+                      <span style={{ fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                        {displayTopic(row.topic)}
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                        <StatusPill status={row.status} />
+                        {!isDone && (
+                          <button
+                            onClick={() => renderRow(row)}
+                            disabled={isRendering}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 3,
+                              padding: "3px 8px", borderRadius: 6, border: "1px solid var(--border)",
+                              background: isRendering ? "var(--bg)" : "var(--primary-light)",
+                              color: isRendering ? "var(--text-muted)" : "var(--accent)",
+                              cursor: isRendering ? "not-allowed" : "pointer",
+                              fontSize: 10, fontWeight: 700, fontFamily: "inherit",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {isRendering
+                              ? <><Loader2 size={9} style={{ animation: "spin 1s linear infinite" }} /> …</>
+                              : <><Play size={9} fill="currentColor" /> Render</>}
+                          </button>
+                        )}
                       </div>
-                    );
-                  })
-                )}
-              </div>
+                    </div>
+                  );
+                };
+
+                return (
+                  <div style={{ maxHeight: 420, overflowY: "auto" }}>
+                    {groups.map(({ label, icon, rows, dim }) => (
+                      <div key={label}>
+                        {/* Section header */}
+                        <div style={{
+                          display: "flex", alignItems: "center", gap: 6,
+                          padding: "5px 12px 4px",
+                          background: "rgba(255,255,255,0.02)",
+                          borderBottom: "1px solid var(--border)",
+                          position: "sticky", top: 0, zIndex: 1,
+                        }}>
+                          <span style={{ fontSize: 10 }}>{icon}</span>
+                          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.8px", textTransform: "uppercase", color: dim ? "var(--text-muted)" : "var(--text-secondary)" }}>
+                            {label}
+                          </span>
+                          <span style={{ fontSize: 9, color: "var(--text-muted)", marginLeft: 2 }}>({rows.length})</span>
+                          {label === "Done" && <span style={{ fontSize: 9, color: "var(--text-muted)", marginLeft: "auto" }}>newest first</span>}
+                        </div>
+                        {rows.map(renderRow_)}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
