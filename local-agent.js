@@ -109,6 +109,22 @@ http.createServer((req, res) => {
     return;
   }
 
+  if (req.url === "/worker-status") {
+    let alive = false;
+    if (workerProc) {
+      try { process.kill(workerProc.pid, 0); alive = true; } catch { alive = false; }
+    }
+    // Auto-restart if crashed
+    if (!alive) {
+      console.log("[agent] Worker was dead — auto-restarting...");
+      startWorker();
+      alive = true;
+    }
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true, workerAlive: alive, pid: workerProc?.pid }));
+    return;
+  }
+
   if (req.url === "/ping") {
     res.writeHead(200);
     res.end(JSON.stringify({ ok: true, platform: process.platform }));

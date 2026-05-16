@@ -339,14 +339,24 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     return () => clearInterval(t);
   }, []);
 
-  // Poll worker status every 10s
+  // Poll worker status every 8s
+  // Priority: ask local agent (most reliable) → fall back to BullMQ Redis check
   useEffect(() => {
     const check = async () => {
+      // 1. Ask local agent directly — it tracks the worker PID and auto-restarts if dead
+      const agent = await fetch("http://localhost:7654/worker-status").catch(() => null);
+      if (agent?.ok) {
+        const d = await agent.json().catch(() => ({}));
+        setWorkerOnline(d.workerAlive === true);
+        return;
+      }
+      // 2. Agent not reachable — fall back to BullMQ Redis check (works for Railway worker)
       const r = await fetch("/api/worker-status").catch(() => null);
       if (r?.ok) { const d = await r.json(); setWorkerOnline(d.online); }
+      else setWorkerOnline(false);
     };
     check();
-    const t = setInterval(check, 10_000);
+    const t = setInterval(check, 8_000);
     return () => clearInterval(t);
   }, []);
 
