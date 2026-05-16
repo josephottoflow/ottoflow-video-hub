@@ -6,9 +6,21 @@
  */
 
 import { store, type LogEntry } from "@/lib/pipeline-store";
-import { rGetStatus, rGetLogs } from "@/lib/pipeline-redis";
+import { rGetStatus, rGetLogs, rClearLogs } from "@/lib/pipeline-redis";
 
 export const dynamic = "force-dynamic";
+
+export async function DELETE() {
+  try {
+    await rClearLogs();
+    store.logs = [];
+    store.activeAgent = "";
+    store.progress = 0;
+    return Response.json({ ok: true });
+  } catch (err) {
+    return Response.json({ ok: false, error: String(err) }, { status: 500 });
+  }
+}
 
 export async function GET() {
   const encoder = new TextEncoder();
