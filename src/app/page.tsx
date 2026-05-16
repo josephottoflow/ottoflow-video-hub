@@ -571,17 +571,50 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                   { label: "Done",    icon: "✅", rows: doneRows, dim: true },
                 ].filter(g => g.rows.length > 0);
 
+                const iconBtn: React.CSSProperties = {
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 24, height: 24, borderRadius: 6,
+                  border: "1px solid var(--border)", background: "var(--bg-elevated)",
+                  color: "var(--text-muted)", cursor: "pointer", flexShrink: 0,
+                  textDecoration: "none", transition: "color 0.15s, border-color 0.15s",
+                };
+
                 const renderRow_ = (row: QueueRow) => {
                   const isRendering = renderingRows.has(row.rowIndex);
                   const isDone      = ["Done","Complete"].includes(row.status);
+                  const slug        = slugOf(row.topic);
                   return (
                     <div key={row.rowIndex} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 12px", borderBottom: "1px solid var(--border)", gap: 8 }}>
                       <span style={{ fontSize: 12, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
                         {displayTopic(row.topic)}
                       </span>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
                         <StatusPill status={row.status} />
-                        {!isDone && (
+                        {isDone ? (
+                          <>
+                            {/* Watch video */}
+                            <a
+                              href={`/api/video/${slug}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="Watch / stream video"
+                              style={iconBtn}
+                            >
+                              <Eye size={11} />
+                            </a>
+                            {/* Open output folder (local only) */}
+                            <button
+                              title="Open output folder (local dev)"
+                              onClick={async () => {
+                                const r = await fetch(`/api/open-folder/${slug}`, { method: "POST" }).catch(() => null);
+                                if (!r?.ok) toast.error("Folder not found — run worker locally to generate outputs");
+                              }}
+                              style={{ ...iconBtn, cursor: "pointer", fontFamily: "inherit" }}
+                            >
+                              <FolderOpen size={11} />
+                            </button>
+                          </>
+                        ) : (
                           <button
                             onClick={() => renderRow(row)}
                             disabled={isRendering}
