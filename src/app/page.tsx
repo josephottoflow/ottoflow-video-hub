@@ -403,13 +403,26 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
 
   const startWorker = async () => {
     setWorkerStarting(true);
+
+    // 1. Try local agent (works from Vercel — browser calls localhost directly)
+    const agent = await fetch("http://localhost:7654/start", { method: "GET" })
+      .catch(() => null);
+
+    if (agent?.ok) {
+      toast.success("Worker starting… ready in ~5 seconds");
+      setTimeout(async () => {
+        const s = await fetch("/api/worker-status").catch(() => null);
+        if (s?.ok) { const sd = await s.json(); setWorkerOnline(sd.online); }
+        setWorkerStarting(false);
+      }, 6000);
+      return;
+    }
+
+    // 2. Try server-side spawn (works when accessing localhost:3000 directly)
     const r = await fetch("/api/start-worker", { method: "POST" }).catch(() => null);
-    if (!r) { toast.error("Could not reach server"); setWorkerStarting(false); return; }
-    const d = await r.json().catch(() => ({}));
-    if (d.vercel) {
-      setShowWorkerGuide(true);
-      setWorkerStarting(false);
-    } else if (d.ok) {
+    const d = await r?.json().catch(() => ({})) ?? {};
+
+    if (d.ok) {
       toast.success("Worker starting… ready in ~5 seconds");
       setTimeout(async () => {
         const s = await fetch("/api/worker-status").catch(() => null);
@@ -417,7 +430,8 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
         setWorkerStarting(false);
       }, 6000);
     } else {
-      toast.error(d.message || "Failed to start worker");
+      // 3. Agent not running — show setup guide
+      setShowWorkerGuide(true);
       setWorkerStarting(false);
     }
   };
@@ -456,43 +470,28 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
               <button onClick={() => setShowWorkerGuide(false)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: 4 }}>×</button>
             </div>
 
-            {/* Option 1 — PM2 (recommended) */}
+            {/* Option 1 — Agent (recommended) */}
             <div style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 10, padding: 16, marginBottom: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#a78bfa", marginBottom: 10 }}>⭐ Option 1 — Always-on background service (recommended)</div>
-              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10 }}>Run these once in your project folder. The worker starts automatically on every PC reboot — no terminal needed.</div>
-              {[
-                { label: "Install PM2 (one-time)", cmd: "npm install -g pm2" },
-                { label: "Start worker as background service", cmd: "pm2 start npm --name ottoflow-worker -- run worker" },
-                { label: "Save so it survives reboots", cmd: "pm2 save && pm2 startup" },
-              ].map(({ label, cmd }) => (
-                <div key={cmd} style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 3 }}>{label}</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(0,0,0,0.4)", borderRadius: 6, padding: "6px 10px" }}>
-                    <code style={{ fontSize: 11, color: "#10b981", flex: 1, fontFamily: "monospace" }}>{cmd}</code>
-                    <button
-                      onClick={() => { navigator.clipboard.writeText(cmd); toast.success("Copied!"); }}
-                      style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 10, flexShrink: 0, fontFamily: "inherit" }}
-                    >Copy</button>
-                  </div>
-                </div>
-              ))}
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#a78bfa", marginBottom: 6 }}>⭐ One-time setup — then the button works forever</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 12 }}>Double-click <strong style={{ color: "var(--text)" }}>start-agent.bat</strong> in your project folder. The worker starts automatically and the button above will control it from anywhere.</div>
+              <div style={{ background: "rgba(0,0,0,0.35)", borderRadius: 8, padding: "10px 14px", fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.9 }}>
+                📁 <code style={{ color: "#a78bfa" }}>D:\tiktok-product-video-factory\</code><br/>
+                &nbsp;&nbsp;&nbsp;→ double-click <strong style={{ color: "#10b981" }}>start-agent.bat</strong><br/>
+                &nbsp;&nbsp;&nbsp;→ minimize the window that opens (don&apos;t close it)
+              </div>
+              <div style={{ marginTop: 10, padding: "8px 12px", background: "rgba(16,185,129,0.06)", borderRadius: 7, border: "1px solid rgba(16,185,129,0.15)", fontSize: 11, color: "var(--text-muted)" }}>
+                💡 <strong style={{ color: "var(--text-secondary)" }}>Auto-start on every boot:</strong> Right-click <code>start-agent.bat</code> → Create Shortcut → press <kbd style={{ background: "rgba(255,255,255,0.08)", padding: "1px 5px", borderRadius: 3, fontSize: 10 }}>Win+R</kbd> → type <code>shell:startup</code> → drag shortcut there.
+              </div>
             </div>
 
             {/* Option 2 — Manual */}
             <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", borderRadius: 10, padding: 16 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", marginBottom: 8 }}>Option 2 — Run manually in terminal</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(0,0,0,0.4)", borderRadius: 6, padding: "6px 10px" }}>
-                <code style={{ fontSize: 11, color: "#10b981", flex: 1, fontFamily: "monospace" }}>npm run worker</code>
-                <button
-                  onClick={() => { navigator.clipboard.writeText("npm run worker"); toast.success("Copied!"); }}
-                  style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 10, flexShrink: 0, fontFamily: "inherit" }}
-                >Copy</button>
-              </div>
-              <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 6 }}>Open a terminal in <code style={{ color: "var(--text-secondary)" }}>D:\tiktok-product-video-factory</code> and run this command. Keep the terminal open while rendering.</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", marginBottom: 8 }}>No setup — run manually each time</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 8 }}>Double-click <strong style={{ color: "var(--text)" }}>start-worker.bat</strong> in the same folder. Keep the window open while rendering.</div>
             </div>
 
             <div style={{ marginTop: 14, fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>
-              After the worker starts, the <span style={{ color: "#10b981", fontWeight: 600 }}>● Worker Online</span> bar will appear here automatically.
+              Once running, the <span style={{ color: "#10b981", fontWeight: 600 }}>● Worker Online</span> bar appears and the button works from anywhere.
             </div>
           </div>
         </div>
