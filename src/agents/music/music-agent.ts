@@ -9,7 +9,6 @@
  */
 
 import puppeteer from "puppeteer";
-import Anthropic from "@anthropic-ai/sdk";
 import * as fs from "fs";
 import * as path from "path";
 import * as https from "https";
@@ -69,14 +68,18 @@ const PIXABAY_BASE = "https://pixabay.com";
 
 // ─── Music Director Agent ─────────────────────────────────────
 
-export class MusicAgent {
-  private claude: Anthropic | null;
+// Stop words to skip when extracting topic keywords
+const STOP_WORDS = new Set([
+  "the","a","an","is","are","and","or","for","in","of","to","by","with",
+  "how","what","why","when","where","which","that","this","these","those",
+  "was","were","be","been","being","have","has","had","do","does","did",
+  "will","would","could","should","may","might","must","can","its","your",
+  "our","their","his","her","my","we","they","it","he","she","you","i",
+  "not","no","so","if","but","yet","just","also","only","even","still",
+  "real","really","actually","simply","quickly","easily","without","vs",
+]);
 
-  constructor() {
-    this.claude = process.env.ANTHROPIC_API_KEY
-      ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-      : null;
-  }
+export class MusicAgent {
 
   static isAvailable(): boolean {
     return true; // Puppeteer + Pixabay — no API key required
@@ -101,41 +104,42 @@ export class MusicAgent {
     return this.downloadBestTrack(tracks, slug, query, tempDir);
   }
 
-  // ─── Claude query builder ─────────────────────────────────
+  // ─── Keyword-based query builder (no external API needed) ──
 
   private async buildQuery(topic: string, style: string, mood: string): Promise<string> {
-    if (this.claude) {
-      try {
-        const msg = await this.claude.messages.create({
-          model:      "claude-haiku-4-5-20251001",
-          max_tokens: 32,
-          messages:   [{
-            role:    "user",
-            content: `Pick a 2-4 word search query for royalty-free instrumental background music that fits this video.
+    return this.buildQueryFromKeywords(topic, style, mood);
+  }
 
-TOPIC: "${topic}"
-STYLE: "${style}"
-MOOD: "${mood}"
+  private buildQueryFromKeywords(topic: string, style: string, mood: string): string {
+    const styleBase = STYLE_QUERY[style.toLowerCase()] ?? MOOD_QUERY[mood?.toLowerCase() ?? ""] ?? "corporate ambient";
 
-Business/SaaS/productivity → "corporate ambient focus"
-Startup/innovation → "inspiring electronic upbeat"
-Motivational → "energetic motivational driving"
-Case study → "cinematic corporate"
-Luxury → "elegant jazz sophisticated"
+    // Extract 1-2 meaningful content words from the topic
+    const topicWords = topic
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(w => w.length > 3 && !STOP_WORDS.has(w));
 
-Output ONLY the query words, nothing else.`,
-          }],
-        });
-        const text = msg.content[0];
-        if (text.type === "text") {
-          const q = text.text.trim().replace(/^["']|["']$/g, "");
-          if (q.length > 2 && q.length < 60) return q;
-        }
-      } catch { /* fall through */ }
-    }
-    return STYLE_QUERY[style.toLowerCase()]
-      ?? MOOD_QUERY[mood?.toLowerCase() ?? ""]
-      ?? "corporate ambient background";
+    // Domain-specific query overrides based on topic keywords
+    const t = topic.toLowerCase();
+    if (t.includes("sigma") || t.includes("dmaic") || t.includes("defect") || t.includes("lean") || t.includes("process"))
+      return `${topicWords[0] ?? "process"} corporate focus professional`;
+    if (t.includes("startup") || t.includes("entrepreneur") || t.includes("launch") || t.includes("founder"))
+      return "startup inspiring electronic upbeat";
+    if (t.includes("profit") || t.includes("revenue") || t.includes("sales") || t.includes("growth") || t.includes("roi"))
+      return "corporate success motivational driving";
+    if (t.includes("ai") || t.includes("automation") || t.includes("workflow") || t.includes("tech") || t.includes("software"))
+      return "electronic ambient technology innovation";
+    if (t.includes("mindset") || t.includes("habit") || t.includes("discipline") || t.includes("success") || t.includes("goal"))
+      return "motivational inspiring uplifting energetic";
+    if (t.includes("marketing") || t.includes("brand") || t.includes("content") || t.includes("social media"))
+      return "upbeat positive creative energetic";
+    if (t.includes("finance") || t.includes("invest") || t.includes("money") || t.includes("budget") || t.includes("wealth"))
+      return "sophisticated corporate cinematic calm";
+
+    // Combine a topic keyword with the style base for variety
+    if (topicWords.length > 0) return `${topicWords[0]} ${styleBase}`;
+    return styleBase;
   }
 
   // ─── Puppeteer scraper — intercepts bootstrap JSON ────────
