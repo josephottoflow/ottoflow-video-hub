@@ -3,12 +3,41 @@
  * Streams a rendered MP4 from the outputs directory (local dev),
  * or redirects to the Google Drive link stored in Postgres (production).
  * Supports Range requests for proper HTML5 video seeking.
+ * HEAD is supported so RemotionPreview can check existence without fetching the full file.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import * as fs from "fs";
 import * as path from "path";
 import { listJobs } from "@/lib/db";
+
+const OUTPUT_DIR = process.env.OUTPUT_DIR || "outputs";
+
+async function resolveVideoPath(safe: string): Promise<{ local: string | null; driveUrl: string | null }> {
+  const local = path.resolve(OUTPUT_DIR, safe, `${safe}.mp4`);
+  if (fs.existsSync(local)) return { local, driveUrl: null };
+
+  try {
+    const jobs = await listJobs(200);
+    const job  = jobs.find(j => j.topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") === safe);
+    if (job?.output_link) return { local: null, driveUrl: job.output_link };
+  } catch { /* DB unavailable */ }
+
+  return { local: null, driveUrl: null };
+}
+
+export async function HEAD(
+  _req: NextRequest,
+  { params }: { params: Promise<{ slug: string }> }
+) {
+  const { slug } = await params;
+  const safe = slug.replace(/[^a-z0-9-]/g, "");
+  if (!safe) return new Response(null, { status: 400 });
+
+  const { local, driveUrl } = await resolveVideoPath(safe);
+  if (local || driveUrl) return new Response(null, { status: 200 });
+  return new Response(null, { status: 404 });
+}
 
 export async function GET(
   req: NextRequest,
@@ -20,14 +49,10 @@ export async function GET(
   const safe = slug.replace(/[^a-z0-9-]/g, "");
   if (!safe) return NextResponse.json({ error: "Invalid slug" }, { status: 400 });
 
-  // On Vercel (no local filesystem): redirect to Drive link stored in DB
-  const videoPath = path.resolve("outputs", safe, `${safe}.mp4`);
-  if (!fs.existsSync(videoPath)) {
-    try {
-      const jobs = await listJobs(200);
-      const job  = jobs.find(j => j.topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") === safe);
-      if (job?.output_link) return NextResponse.redirect(job.output_link);
-    } catch { /* DB unavailable — fall through to 404 */ }
+  const { local: videoPath, driveUrl } = await resolveVideoPath(safe);
+
+  if (!videoPath) {
+    if (driveUrl) return NextResponse.redirect(driveUrl);
     return NextResponse.json({ error: "Video not found" }, { status: 404 });
   }
 

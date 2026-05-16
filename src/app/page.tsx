@@ -11,7 +11,7 @@ import {
   Image, Tag, Video, Terminal, Eye, FolderOpen,
   Activity, TrendingUp, Layers, Hash, PenLine,
 } from "lucide-react";
-import { RemotionPreview } from "./components/RemotionPreview";
+import { RemotionPreview, useVideoInfo } from "./components/RemotionPreview";
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -1130,6 +1130,8 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
 // ─── Video Preview Modal ──────────────────────────────────────
 
 function VideoPreviewModal({ slug, topic, onClose }: { slug: string; topic: string; onClose: () => void }) {
+  const { url, source, loading } = useVideoInfo(slug);
+
   return (
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -1154,9 +1156,18 @@ function VideoPreviewModal({ slug, topic, onClose }: { slug: string; topic: stri
         <div style={{ width: "100%", maxWidth: 260 }}>
           <RemotionPreview slug={slug} />
         </div>
-        <a href={`/api/video/${slug}`} download={`${slug}.mp4`} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 20px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: "var(--primary-light)", color: "var(--accent)", border: "1px solid rgba(99,102,241,0.25)", textDecoration: "none" }}>
-          ↓ Download MP4
-        </a>
+        {!loading && url && (
+          source === "local"
+            ? (
+              <a href={url} download={`${slug}.mp4`} style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 20px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: "var(--primary-light)", color: "var(--accent)", border: "1px solid rgba(99,102,241,0.25)", textDecoration: "none" }}>
+                ↓ Download MP4
+              </a>
+            ) : (
+              <a href={url} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 20px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: "var(--primary-light)", color: "var(--accent)", border: "1px solid rgba(99,102,241,0.25)", textDecoration: "none" }}>
+                ↗ Open in Drive
+              </a>
+            )
+        )}
       </motion.div>
     </motion.div>
   );

@@ -6,16 +6,22 @@ interface RemotionPreviewProps {
   slug?: string;
 }
 
+interface VideoInfo {
+  source: "local" | "drive" | null;
+  url: string | null;
+}
+
 export function RemotionPreview({ slug }: RemotionPreviewProps) {
-  const [hasVideo, setHasVideo] = useState(false);
+  const [info,     setInfo]     = useState<VideoInfo>({ source: null, url: null });
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
     if (!slug) { setChecking(false); return; }
-    // Check if a rendered video exists for this slug
-    fetch(`/api/video/${slug}`, { method: "HEAD" })
-      .then((r) => { setHasVideo(r.ok); setChecking(false); })
-      .catch(() => { setHasVideo(false); setChecking(false); });
+    setChecking(true);
+    fetch(`/api/video/${slug}/url`)
+      .then(r => r.ok ? r.json() : { source: null, url: null })
+      .then((d: VideoInfo) => { setInfo(d); setChecking(false); })
+      .catch(() => { setInfo({ source: null, url: null }); setChecking(false); });
   }, [slug]);
 
   if (checking) {
@@ -26,7 +32,7 @@ export function RemotionPreview({ slug }: RemotionPreviewProps) {
     );
   }
 
-  if (!slug || !hasVideo) {
+  if (!slug || !info.url) {
     return (
       <div style={containerStyle}>
         <Placeholder label={slug ? "No video yet — run the pipeline" : "Run the pipeline to see a preview"} />
@@ -37,7 +43,7 @@ export function RemotionPreview({ slug }: RemotionPreviewProps) {
   return (
     <div style={containerStyle}>
       <video
-        src={`/api/video/${slug}`}
+        src={info.url}
         controls
         loop
         playsInline
@@ -45,6 +51,22 @@ export function RemotionPreview({ slug }: RemotionPreviewProps) {
       />
     </div>
   );
+}
+
+export function useVideoInfo(slug: string | undefined): VideoInfo & { loading: boolean } {
+  const [info,    setInfo]    = useState<VideoInfo>({ source: null, url: null });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!slug) { setLoading(false); return; }
+    setLoading(true);
+    fetch(`/api/video/${slug}/url`)
+      .then(r => r.ok ? r.json() : { source: null, url: null })
+      .then((d: VideoInfo) => { setInfo(d); setLoading(false); })
+      .catch(() => { setInfo({ source: null, url: null }); setLoading(false); });
+  }, [slug]);
+
+  return { ...info, loading };
 }
 
 function Placeholder({ label, showSpinner }: { label: string; showSpinner?: boolean }) {

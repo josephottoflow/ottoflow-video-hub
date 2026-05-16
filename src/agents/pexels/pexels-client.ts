@@ -1,22 +1,21 @@
 /**
- * PEXELS CLIENT v2 — AI-powered smart stock video fetcher
+ * PEXELS CLIENT v2 — Smart stock video fetcher
  *
  * What makes it smart:
- * - Claude generates 8 topic-specific, scene-aware queries before calling Pexels
+ * - Keyword-based topic-specific, scene-aware query generation (no API key needed)
  * - Portrait-first with landscape fallback per query (more coverage)
  * - size=medium (Full HD) to avoid slow 4K downloads
  * - Client-side duration filter (5-90 seconds — usable as backgrounds)
  * - Deduplication by Pexels ID across all queries
- * - Storyboard queries merged with AI queries for maximum diversity
+ * - Storyboard queries merged with generated queries for maximum diversity
  */
 import * as fs from "fs";
 import * as path from "path";
 import * as https from "https";
-import Anthropic from "@anthropic-ai/sdk";
 
 const PEXELS_API_BASE = "https://api.pexels.com";
 
-// ─── Scene visual intent (template fallback when Claude is unavailable) ──────
+// ─── Scene visual intent — generates scene-aware queries per topic ────────────
 const SCENE_INTENT: Record<string, string> = {
   hook:     "dramatic bold dark cinematic",
   problem:  "struggle challenge frustrated office",
@@ -25,6 +24,20 @@ const SCENE_INTENT: Record<string, string> = {
   proof:    "success growth achievement results",
   cta:      "motivation action confidence leader",
 };
+
+// ─── Domain-specific topic → query overrides ─────────────────────────────────
+const TOPIC_OVERRIDES: [RegExp, string[]][] = [
+  [/sigma|dmaic|defect|lean|process|quality/, ["factory floor quality control", "engineer whiteboard process", "manufacturing precision closeup", "team meeting improvement", "data chart analytics dark", "worker efficiency training"]],
+  [/startup|entrepreneur|launch|founder/,     ["startup office team dark", "entrepreneur laptop night", "pitch presentation meeting", "technology innovation desk", "founder writing notebook", "modern coworking space"]],
+  [/profit|revenue|sales|growth|roi|business/,["businessman graph success dark", "sales team office meeting", "revenue growth chart screen", "deal handshake closeup", "corporate success celebration", "financial report desk"]],
+  [/ai|automation|workflow|tech|software/,    ["developer coding screen dark", "artificial intelligence digital", "automation robot technology", "data visualization screen", "server room blue light", "software interface closeup"]],
+  [/mindset|habit|discipline|success|goal/,   ["person running morning motivation", "meditation focus calm closeup", "journal writing goals desk", "athlete training discipline", "success celebration confident", "sunrise determination walk"]],
+  [/marketing|brand|content|social media/,    ["creative team brainstorm office", "content creator studio setup", "social media phone scrolling", "brand design mockup closeup", "marketing strategy whiteboard", "influencer camera confident"]],
+  [/finance|invest|money|budget|wealth/,      ["financial advisor chart dark", "investment portfolio screen", "money savings jar closeup", "stock market numbers glow", "bank building exterior", "wealth planning notebook"]],
+  [/health|fitness|wellness|nutrition/,       ["gym workout motivation dark", "healthy food preparation", "runner outdoor morning", "doctor consultation office", "meditation yoga calm", "supplement product closeup"]],
+  [/leadership|team|management|culture/,      ["leader presentation conference", "team collaboration modern office", "manager coaching employee", "diverse team meeting success", "executive thinking window", "company culture casual"]],
+  [/product|ecommerce|shop|store|sell/,       ["product photography closeup dark", "online shopping phone screen", "ecommerce packaging unboxing", "store display modern minimal", "customer happy purchase", "delivery box door step"]],
+];
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export interface PexelsPhoto {
@@ -71,13 +84,9 @@ export interface PexelsSearchResult<T> {
 // ─── Client ──────────────────────────────────────────────────────────────────
 export class PexelsClient {
   private apiKey: string;
-  private anthropic: Anthropic | null;
 
   constructor(apiKey?: string) {
     this.apiKey = apiKey || process.env.PEXELS_API_KEY || "";
-    this.anthropic = process.env.ANTHROPIC_API_KEY
-      ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-      : null;
     if (!this.apiKey) {
       console.warn("[pexels] No API key found. Set PEXELS_API_KEY in .env");
     }
@@ -164,78 +173,50 @@ export class PexelsClient {
     return destPath;
   }
 
-  // ─── AI Query Generator ────────────────────────────────────────────────────
+  // ─── Keyword-based Query Generator ───────────────────────────────────────────
 
   /**
-   * Use Claude to generate 8 topic-specific, scene-aware Pexels search queries.
-   * Each query maps to a scene need (hook, problem, hero, features, proof, cta)
-   * so the backgrounds are actually relevant to the content, not generic.
+   * Generate 8 topic-specific, scene-aware Pexels queries using keyword extraction.
+   * No external API required — uses domain overrides + topic keywords + scene intents.
    */
-  private async generateSmartQueries(
+  private generateSmartQueries(
     topic: string,
-    style: string,
+    _style: string,
     storyboardQueries: string[]
-  ): Promise<string[]> {
-    if (!this.anthropic) {
-      // Template fallback — use topic keywords + scene intent
-      const kw = topic.toLowerCase().split(/\s+/).slice(0, 2).join(" ");
-      const fallback = Object.values(SCENE_INTENT).map(intent => `${kw} ${intent}`);
-      return storyboardQueries.length >= 4
-        ? [...new Set([...storyboardQueries, ...fallback])]
-        : fallback;
+  ): string[] {
+    const t = topic.toLowerCase();
+
+    // Try domain-specific overrides first
+    for (const [pattern, queries] of TOPIC_OVERRIDES) {
+      if (pattern.test(t)) {
+        const merged = [...new Set([...storyboardQueries, ...queries])];
+        console.log(`[pexels] Domain queries matched: ${merged.slice(0, 3).join(" | ")} +${Math.max(0, merged.length - 3)} more`);
+        return merged;
+      }
     }
 
-    try {
-      const prompt = `You are an expert at finding the perfect stock video footage for TikTok educational videos.
+    // Generic: extract topic keywords + scene intent modifiers
+    const stopWords = new Set(["the","a","an","is","are","and","or","for","in","of","to","by","with","how","what","why","does","your","our"]);
+    const kws = t.replace(/[^a-z0-9\s]/g, " ").split(/\s+/)
+      .filter(w => w.length > 3 && !stopWords.has(w))
+      .slice(0, 3);
 
-TOPIC: "${topic}"
-STYLE: ${style}
+    const kw1 = kws[0] ?? "business";
+    const kw2 = kws[1] ?? kws[0] ?? "professional";
+    const generated = [
+      `${kw1} dark cinematic dramatic`,
+      `${kw1} ${kw2} challenge frustrated`,
+      `${kw1} solution breakthrough modern`,
+      `${kw2} process steps organized`,
+      `${kw1} success results achievement`,
+      `${kw2} motivation confident action`,
+      `${kw1} expert professional office`,
+      `${kw2} team collaboration meeting`,
+    ];
 
-Generate exactly 8 Pexels video search queries that will find visually compelling footage for this specific topic.
-
-Rules:
-- Each query must be 3-5 words maximum
-- Must describe something a camera can actually capture (real objects, real actions, real places)
-- Must be SPECIFICALLY about this topic — not generic "business office" or "abstract background"
-- Include the visual mood: "dark", "cinematic", "closeup", "night", "bright"
-- Think about what EXPERTS and PRACTITIONERS of this topic actually DO and USE
-
-Scene coverage needed (at least 1 per scene):
-1. HOOK: Dramatic, stops the scroll — bold visual that signals the topic
-2. PROBLEM: Shows the pain point — what struggles before knowing this topic
-3. INSIGHT: The moment of clarity or the core concept visualized
-4. PROCESS: The method or steps being applied
-5. RESULTS: What success looks like after applying this knowledge
-6. ACTION: Motivational, forward-moving visual
-
-For reference, if the topic were "Compound Interest", good queries would be:
-["calculator desk financial planning", "money growth chart dark", "piggy bank savings jar closeup", "investor reading financial report night", "wealth building notebook pen", "stock market screen numbers glow", "retired couple happy beach sunset", "bank vault door dramatic"]
-
-Return ONLY a JSON array of 8 strings. No explanation.`;
-
-      const message = await this.anthropic.messages.create({
-        model:      "claude-haiku-4-5-20251001",
-        max_tokens: 350,
-        messages:   [{ role: "user", content: prompt }],
-      });
-
-      const text = message.content[0];
-      if (text.type !== "text") throw new Error("Non-text Claude response");
-      const raw      = text.text.trim().replace(/^```json?\n?/, "").replace(/\n?```$/, "");
-      const aiQueries = JSON.parse(raw) as string[];
-
-      // Storyboard queries go first (they're scene-assigned), AI queries add diversity
-      const merged = [...storyboardQueries, ...aiQueries];
-      const deduped = [...new Set(merged)];
-      console.log(`[pexels] Generated ${aiQueries.length} AI queries + ${storyboardQueries.length} storyboard queries = ${deduped.length} unique`);
-      return deduped;
-    } catch (err) {
-      console.warn(`[pexels] AI query generation failed, using storyboard queries:`, err instanceof Error ? err.message : err);
-      // Fallback to storyboard queries or template
-      if (storyboardQueries.length >= 3) return storyboardQueries;
-      const kw = topic.toLowerCase().split(/\s+/).slice(0, 2).join(" ");
-      return Object.values(SCENE_INTENT).map(intent => `${kw} ${intent}`);
-    }
+    const merged = [...new Set([...storyboardQueries, ...generated])];
+    console.log(`[pexels] Keyword queries: ${merged.slice(0, 3).join(" | ")} +${Math.max(0, merged.length - 3)} more`);
+    return merged;
   }
 
   // ─── Main Fetch Method ─────────────────────────────────────────────────────
@@ -264,9 +245,9 @@ Return ONLY a JSON array of 8 strings. No explanation.`;
     const destDir = path.resolve("public", "content", slug, "backgrounds");
     fs.mkdirSync(destDir, { recursive: true });
 
-    // Generate smart, topic-specific queries via Claude
+    // Generate smart, topic-specific queries via keyword extraction
     console.log(`[pexels] Generating smart queries for: "${productName}"`);
-    const queries = await this.generateSmartQueries(productName, style, videoQueries);
+    const queries = this.generateSmartQueries(productName, style, videoQueries);
     console.log(`[pexels] Query plan: ${queries.slice(0, 4).join(" | ")}${queries.length > 4 ? ` +${queries.length - 4} more` : ""}`);
 
     // Topic-aware photo query (not just style — includes topic keywords)
