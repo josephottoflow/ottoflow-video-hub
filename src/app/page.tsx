@@ -267,6 +267,8 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   const [showWorkerGuide,  setShowWorkerGuide]  = useState(false);
   const [installingStart,  setInstallingStart]  = useState(false);
   const [startupInstalled, setStartupInstalled] = useState(false);
+  const [workerLogs,       setWorkerLogs]       = useState<string[]>([]);
+  const [showWorkerLogs,   setShowWorkerLogs]   = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -347,7 +349,13 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
       const agent = await fetch("http://localhost:7654/worker-status").catch(() => null);
       if (agent?.ok) {
         const d = await agent.json().catch(() => ({}));
-        setWorkerOnline(d.workerAlive === true);
+        const alive = d.workerAlive === true;
+        setWorkerOnline(alive);
+        if (!alive) {
+          // Fetch logs so user can see why worker is offline
+          const lr = await fetch("http://localhost:7654/logs").catch(() => null);
+          if (lr?.ok) { const ld = await lr.json().catch(() => ({})); setWorkerLogs(ld.lines ?? []); }
+        }
         return;
       }
       // 2. Agent not reachable — fall back to BullMQ Redis check (works for Railway worker)
@@ -649,8 +657,37 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                   ? <><Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} /> Starting…</>
                   : <><Play size={11} fill="currentColor" /> Start Worker</>}
               </button>
+              {workerLogs.length > 0 && (
+                <button
+                  onClick={() => setShowWorkerLogs(v => !v)}
+                  style={{
+                    padding: "6px 13px", borderRadius: 7,
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    background: "rgba(255,255,255,0.04)", color: "var(--text-muted)",
+                    fontSize: 11, fontWeight: 700, cursor: "pointer",
+                    fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5,
+                  }}
+                >
+                  <Terminal size={11} /> {showWorkerLogs ? "Hide Logs" : "View Logs"}
+                </button>
+              )}
             </div>
           </div>
+          {/* Worker log panel */}
+          {showWorkerLogs && workerLogs.length > 0 && (
+            <div style={{
+              marginTop: 8, padding: "8px 10px", borderRadius: 7,
+              background: "rgba(0,0,0,0.5)", border: "1px solid rgba(245,158,11,0.15)",
+              maxHeight: 160, overflowY: "auto",
+            }}>
+              {workerLogs.map((line, i) => (
+                <div key={i} style={{
+                  fontSize: 10, fontFamily: "monospace", color: line.includes("err") ? "#f43f5e" : "#94a3b8",
+                  lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-all",
+                }}>{line}</div>
+              ))}
+            </div>
+          )}
           {/* Row 2: OS-aware 2-step note */}
           <div style={{
             marginTop: 8, padding: "8px 12px", borderRadius: 7,

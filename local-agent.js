@@ -13,20 +13,44 @@ const PROJ  = __dirname;
 const IS_WIN = process.platform === "win32";
 const IS_MAC = process.platform === "darwin";
 
+const LOG_FILE = path.join(PROJ, "worker.log");
+let lastError  = "";
 let workerProc = null;
+
+function log(line) {
+  const ts  = new Date().toISOString().slice(11, 19);
+  const out = `[${ts}] ${line}\n`;
+  process.stdout.write(out);
+  try { fs.appendFileSync(LOG_FILE, out); } catch {}
+}
 
 function startWorker() {
   if (workerProc && !workerProc.killed) {
     try { process.kill(-workerProc.pid); } catch {}
   }
+  // Trim log file to last 200 lines on each start
+  try {
+    const lines = fs.readFileSync(LOG_FILE, "utf8").split("\n");
+    if (lines.length > 200) fs.writeFileSync(LOG_FILE, lines.slice(-200).join("\n"));
+  } catch {}
+
   workerProc = spawn("npm", ["run", "worker"], {
-    cwd:      PROJ,
-    shell:    true,
-    detached: true,
-    stdio:    "ignore",
+    cwd:   PROJ,
+    shell: true,
+    stdio: ["ignore", "pipe", "pipe"],
   });
-  workerProc.unref();
-  console.log("[agent] Worker started");
+
+  workerProc.stdout?.on("data", d => { const t = d.toString().trim(); if (t) log("[worker] " + t); });
+  workerProc.stderr?.on("data", d => {
+    const t = d.toString().trim();
+    if (t) { log("[worker-err] " + t); lastError = t.slice(0, 300); }
+  });
+  workerProc.on("exit", (code) => {
+    log(`[agent] Worker exited (code ${code}) — will restart in 5s`);
+    setTimeout(startWorker, 5000);
+  });
+
+  log("[agent] Worker started (pid " + workerProc.pid + ")");
 }
 
 function installStartup() {
@@ -122,6 +146,17 @@ http.createServer((req, res) => {
     }
     res.writeHead(200);
     res.end(JSON.stringify({ ok: true, workerAlive: alive, pid: workerProc?.pid }));
+    return;
+  }
+
+  if (req.url === "/logs") {
+    let lines = [];
+    try {
+      const raw = fs.readFileSync(LOG_FILE, "utf8");
+      lines = raw.split("\n").filter(Boolean).slice(-50);
+    } catch {}
+    res.writeHead(200);
+    res.end(JSON.stringify({ ok: true, lines, lastError }));
     return;
   }
 
