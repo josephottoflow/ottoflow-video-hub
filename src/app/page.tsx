@@ -663,7 +663,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 10, color: "var(--text-muted)", fontWeight: 600, marginBottom: 3 }}>🍎 Mac</div>
                 <div style={{ fontSize: 10, color: "var(--text-secondary)", lineHeight: 1.7 }}>
-                  ① Download → save <code style={{ color: "#f59e0b" }}>start-agent.command</code> to your project folder → open Terminal → run: <code style={{ color: "#a78bfa" }}>chmod +x start-agent.command && ./start-agent.command</code><br/>
+                  ① Download → save <code style={{ color: "#f59e0b" }}>start-agent.command</code> to your project folder → double-click it → click <strong>Workers</strong><br/>
                   ② Green bar appears → click <strong>Install Auto-Start</strong> → done forever ✓
                 </div>
               </div>
