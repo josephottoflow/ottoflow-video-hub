@@ -264,6 +264,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   const [activeJobs,    setActiveJobs]    = useState<DbJob[]>([]);
   const [workerOnline,  setWorkerOnline]  = useState<boolean | null>(null);
   const [workerStarting, setWorkerStarting] = useState(false);
+  const [showWorkerGuide, setShowWorkerGuide] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -406,7 +407,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     if (!r) { toast.error("Could not reach server"); setWorkerStarting(false); return; }
     const d = await r.json().catch(() => ({}));
     if (d.vercel) {
-      toast.info("On Vercel: deploy to Railway or run `npm run worker` locally", { duration: 8000 });
+      setShowWorkerGuide(true);
       setWorkerStarting(false);
     } else if (d.ok) {
       toast.success("Worker starting… ready in ~5 seconds");
@@ -433,6 +434,69 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+
+      {/* ── WORKER SETUP GUIDE MODAL ── */}
+      {showWorkerGuide && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 100,
+          background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 24,
+        }} onClick={() => setShowWorkerGuide(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: "#0f0f1e", border: "1px solid rgba(99,102,241,0.3)",
+            borderRadius: 14, padding: 28, maxWidth: 520, width: "100%",
+            boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text)", marginBottom: 4 }}>Start the Render Worker</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>The worker runs on your local machine and connects to the cloud queue automatically.</div>
+              </div>
+              <button onClick={() => setShowWorkerGuide(false)} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 20, lineHeight: 1, padding: 4 }}>×</button>
+            </div>
+
+            {/* Option 1 — PM2 (recommended) */}
+            <div style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 10, padding: 16, marginBottom: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#a78bfa", marginBottom: 10 }}>⭐ Option 1 — Always-on background service (recommended)</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 10 }}>Run these once in your project folder. The worker starts automatically on every PC reboot — no terminal needed.</div>
+              {[
+                { label: "Install PM2 (one-time)", cmd: "npm install -g pm2" },
+                { label: "Start worker as background service", cmd: "pm2 start npm --name ottoflow-worker -- run worker" },
+                { label: "Save so it survives reboots", cmd: "pm2 save && pm2 startup" },
+              ].map(({ label, cmd }) => (
+                <div key={cmd} style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 3 }}>{label}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(0,0,0,0.4)", borderRadius: 6, padding: "6px 10px" }}>
+                    <code style={{ fontSize: 11, color: "#10b981", flex: 1, fontFamily: "monospace" }}>{cmd}</code>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(cmd); toast.success("Copied!"); }}
+                      style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 10, flexShrink: 0, fontFamily: "inherit" }}
+                    >Copy</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Option 2 — Manual */}
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", borderRadius: 10, padding: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", marginBottom: 8 }}>Option 2 — Run manually in terminal</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(0,0,0,0.4)", borderRadius: 6, padding: "6px 10px" }}>
+                <code style={{ fontSize: 11, color: "#10b981", flex: 1, fontFamily: "monospace" }}>npm run worker</code>
+                <button
+                  onClick={() => { navigator.clipboard.writeText("npm run worker"); toast.success("Copied!"); }}
+                  style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 10, flexShrink: 0, fontFamily: "inherit" }}
+                >Copy</button>
+              </div>
+              <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 6 }}>Open a terminal in <code style={{ color: "var(--text-secondary)" }}>D:\tiktok-product-video-factory</code> and run this command. Keep the terminal open while rendering.</div>
+            </div>
+
+            <div style={{ marginTop: 14, fontSize: 11, color: "var(--text-muted)", textAlign: "center" }}>
+              After the worker starts, the <span style={{ color: "#10b981", fontWeight: 600 }}>● Worker Online</span> bar will appear here automatically.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── TOP BAR: title + stats + run button ── */}
       <div style={{
@@ -525,7 +589,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
           >
             {workerStarting
               ? <><Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} /> Starting…</>
-              : <><Play size={11} fill="currentColor" /> Start Worker</>}
+              : <><Play size={11} fill="currentColor" /> How to Start Worker</>}
           </button>
         </div>
       )}
