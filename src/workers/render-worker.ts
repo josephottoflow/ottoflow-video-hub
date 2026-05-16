@@ -20,7 +20,7 @@ import { PipelineOrchestrator }   from "../agents/pipeline/orchestrator";
 import { PipelineOrchestratorV2 } from "../agents/pipeline/orchestrator-v2";
 import { updateJobStatus, markStuckJobsError, getJob } from "../lib/db";
 import { ensureBrowser } from "@remotion/renderer";
-import { emitLog, inferAgent, inferLevel } from "../lib/pipeline-store";
+import { emitLog, inferAgent, inferLevel, setStatus } from "../lib/pipeline-store";
 
 const CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
 
@@ -101,6 +101,7 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown pipeline error";
     const durationMs = Date.now() - startTime;
+    setStatus("error");
     try {
       await updateJobStatus(dbJobId, "error", { error: message, duration_ms: durationMs });
     } catch (dbErr) {
@@ -123,6 +124,7 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
     }
     console.log(`[worker] Done: ${topic} → ${result.outputLink} (${Math.round(durationMs / 1000)}s)`);
   } else {
+    setStatus("error");
     try {
       await updateJobStatus(dbJobId, "error", { error: result.error, duration_ms: durationMs });
     } catch (dbErr) {

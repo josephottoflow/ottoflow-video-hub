@@ -269,7 +269,9 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   const [startupInstalled, setStartupInstalled] = useState(false);
   const [workerLogs,       setWorkerLogs]       = useState<string[]>([]);
   const [showWorkerLogs,   setShowWorkerLogs]   = useState(false);
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const logEndRef   = useRef<HTMLDivElement>(null);
+  const logPanelRef = useRef<HTMLDivElement>(null);
+  const [logAtBottom, setLogAtBottom] = useState(true);
 
   useEffect(() => {
     let es: EventSource;
@@ -285,7 +287,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
             setCurrentTopic(msg.topic || ""); setProgress(msg.progress || 0);
             setLogs(msg.logs || []);
           } else if (msg.type === "log") {
-            setLogs((prev) => [...prev.slice(-199), msg.entry]);
+            setLogs((prev) => [...prev.slice(-499), msg.entry]);
             const incoming = msg.entry.agent as string;
             setActiveAgent((prev) => {
               if (prev && prev !== incoming) setDoneAgents((d) => new Set([...d, prev]));
@@ -318,7 +320,9 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     return () => { es?.close(); clearTimeout(reconnectTimer); };
   }, []);
 
-  useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
+  useEffect(() => {
+    if (logAtBottom) logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs, logAtBottom]);
 
   const fetchQueue = useCallback(async () => {
     const r = await fetch("/api/queue").catch(() => null);
@@ -832,7 +836,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
       </div>
 
       {/* ── MAIN 2-COL: preview+queue | log ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 310px", flex: 1, minHeight: 0, overflow: "hidden" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", flex: 1, minHeight: 0, overflow: "hidden" }}>
 
         {/* LEFT: progress + preview + queue */}
         <div style={{ overflowY: "auto", padding: "16px 16px 16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1095,7 +1099,15 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
             </span>
             <button onClick={() => setLogs([])} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 9, fontFamily: "inherit", fontWeight: 700, letterSpacing: "0.5px" }}>CLEAR</button>
           </div>
-          <div style={{ flex: 1, overflowY: "auto", padding: "6px 0", fontFamily: "'SF Mono','Fira Code',monospace", fontSize: 10.5 }}>
+          <div
+            ref={logPanelRef}
+            onScroll={() => {
+              const el = logPanelRef.current;
+              if (!el) return;
+              setLogAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 60);
+            }}
+            style={{ flex: 1, overflowY: "auto", padding: "6px 0", fontFamily: "'SF Mono','Fira Code',monospace", fontSize: 10.5, position: "relative" }}
+          >
             {logs.length === 0 ? (
               <div style={{ padding: "32px 16px", color: "var(--text-muted)", textAlign: "center", lineHeight: 2 }}>
                 <Terminal size={22} style={{ opacity: 0.15, display: "block", margin: "0 auto 8px" }} />
@@ -1117,6 +1129,14 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
               </div>
             ))}
             <div ref={logEndRef} />
+            {!logAtBottom && logs.length > 0 && (
+              <button
+                onClick={() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); setLogAtBottom(true); }}
+                style={{ position: "sticky", bottom: 8, left: "50%", transform: "translateX(-50%)", display: "block", background: "#6366f1", border: "none", color: "#fff", borderRadius: 20, padding: "3px 10px", fontSize: 9, fontWeight: 700, cursor: "pointer", letterSpacing: "0.5px", opacity: 0.92, zIndex: 10 }}
+              >
+                ↓ LATEST
+              </button>
+            )}
           </div>
         </div>
       </div>
