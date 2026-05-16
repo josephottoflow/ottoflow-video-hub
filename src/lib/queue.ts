@@ -3,7 +3,15 @@ import IORedis from "ioredis";
 
 export const redisConnection = new IORedis(
   process.env.REDIS_URL || "redis://localhost:6379",
-  { maxRetriesPerRequest: null, lazyConnect: true, enableReadyCheck: false }
+  {
+    maxRetriesPerRequest: null,
+    lazyConnect:          true,
+    enableReadyCheck:     false,
+    // Keep TCP alive so Upstash doesn't close idle connections (ETIMEDOUT)
+    keepAlive:            10_000,
+    connectTimeout:       10_000,
+    retryStrategy:        (times) => Math.min(times * 500, 5_000),
+  }
 );
 
 export const RENDER_QUEUE = "render";
