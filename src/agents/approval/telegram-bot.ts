@@ -118,15 +118,21 @@ export class TelegramApprovalBot {
     videoPath: string,
     topic: string,
     hooks: { a: string; b: string; c: string },
-    hashtags: string[]
+    hashtags: string[],
+    slug?: string
   ): Promise<void> {
-    const caption = this.buildDeliveryCaption(topic, hooks, hashtags);
+    const caption  = this.buildDeliveryCaption(topic, hooks, hashtags);
+    const jobSlug  = slug || topic.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const markup   = {
+      inline_keyboard: [[
+        { text: "✅ Approve", callback_data: `approve:${jobSlug}` },
+        { text: "❌ Reject",  callback_data: `reject:${jobSlug}`  },
+      ]],
+    };
 
     try {
-      await this.sendVideoFile(videoPath, caption);
-      await this.sendText(`✅ *Delivered:* ${this.escapeMarkdown(topic)}\n\n📋 Caption above — copy\\-paste to post\\.`);
+      await this.sendVideoFile(videoPath, caption, markup);
     } catch (err) {
-      // If video upload fails (e.g. >50MB), send as document
       console.warn("[telegram] sendVideo failed, trying sendDocument:", err);
       await this.sendDocumentFile(videoPath, caption);
     }
@@ -426,7 +432,7 @@ export class TelegramApprovalBot {
 
   // === Video Delivery ===
 
-  private async sendVideoFile(videoPath: string, caption: string): Promise<void> {
+  private async sendVideoFile(videoPath: string, caption: string, replyMarkup?: object): Promise<void> {
     const formData = new FormData();
     const buffer   = fs.readFileSync(videoPath);
     const blob     = new Blob([buffer], { type: "video/mp4" });
@@ -436,6 +442,7 @@ export class TelegramApprovalBot {
     formData.append("caption",    caption.length > 1024 ? caption.slice(0, 1020) + "..." : caption);
     formData.append("parse_mode", "MarkdownV2");
     formData.append("supports_streaming", "true");
+    if (replyMarkup) formData.append("reply_markup", JSON.stringify(replyMarkup));
 
     const res  = await fetch(`${TELEGRAM_API}${this.botToken}/sendVideo`, {
       method: "POST",

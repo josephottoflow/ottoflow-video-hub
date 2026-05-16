@@ -115,6 +115,7 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
   const durationMs = Date.now() - startTime;
 
   if (result.success) {
+    setStatus("done");
     try {
       await updateJobStatus(dbJobId, "done", {
         output_path: result.outputDir,
@@ -140,12 +141,18 @@ async function startup() {
   startStaticServer();
   await checkRedis();
 
-  // Forward console.log to Redis so Vercel SSE shows live progress
-  const _origLog = console.log.bind(console);
+  // Forward console.log + console.error to Redis so Vercel SSE shows live progress
+  const _origLog   = console.log.bind(console);
+  const _origError = console.error.bind(console);
   console.log = (...args: unknown[]) => {
     const msg = args.map(String).join(" ");
     _origLog(msg);
     emitLog(inferAgent(msg), msg, inferLevel(msg));
+  };
+  console.error = (...args: unknown[]) => {
+    const msg = args.map(String).join(" ");
+    _origError(msg);
+    emitLog(inferAgent(msg), `ERROR: ${msg}`, "error");
   };
 
   // Ensure Chrome Headless Shell is available (downloads if missing, fast if cached)

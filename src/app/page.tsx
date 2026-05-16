@@ -483,7 +483,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
 
   const stats = {
     total:   queue.length,
-    pending: queue.filter(r => r.status === "Pending").length,
+    pending: queue.filter(r => ["Pending", "Queued"].includes(r.status)).length,
     active:  queue.filter(r => ["Processing","Rendering","Exporting"].includes(r.status)).length,
     done:    queue.filter(r => ["Done","Complete"].includes(r.status)).length,
     error:   queue.filter(r => r.status === "Error").length,
@@ -967,7 +967,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                 });
 
                 const activeRows  = mergedQueue.filter(r => ["Processing","Rendering","Exporting"].includes(r.status));
-                const pendingRows = mergedQueue.filter(r => r.status === "Pending");
+                const pendingRows = mergedQueue.filter(r => ["Pending", "Queued"].includes(r.status));
                 const errorRows   = mergedQueue.filter(r => r.status === "Error");
                 const doneRows    = mergedQueue.filter(r => ["Done","Complete"].includes(r.status)).sort((a, b) => b.rowIndex - a.rowIndex);
 

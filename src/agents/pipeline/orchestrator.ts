@@ -151,6 +151,7 @@ export class PipelineOrchestrator {
       const rawDesign = await this.designAgent.generateDesign(row);
       const design    = this.branding.applyBrand(rawDesign);
       console.log(`[${slug}] Design: ${design.theme} theme / ${design.mood} mood — ${design.rationale}`);
+      console.log(`[${slug}] Branding: Ottoflow palette applied — ${design.brandColors.primary} / CTA: "${this.branding.getCta(row.style)}"`);
 
       // ── 2. Generate storyboard (shot plan + visual consistency) ─
       setStatus("running", row.topic, 20);
@@ -287,7 +288,8 @@ export class PipelineOrchestrator {
         deliveryPath,
         row.topic,
         { a: row.hookA, b: row.hookB, c: row.hookC },
-        hashtags
+        hashtags,
+        slug
       );
 
       // Remove temp delivery copy if it was created separately
@@ -307,6 +309,7 @@ export class PipelineOrchestrator {
       ]);
 
       console.log(`[${slug}] Delivered to Telegram! Local copy → ${outputLink}`);
+      setStatus("done", row.topic, 100);
       return this.result(row.topic, slug, true, undefined, startedAt, startTime, outputLink, outputDir);
 
     } catch (err) {
