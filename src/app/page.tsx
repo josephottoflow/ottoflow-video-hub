@@ -262,9 +262,11 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   const [renderingRows, setRenderingRows] = useState<Set<number>>(new Set());
   const [stuckCount,    setStuckCount]    = useState(0);
   const [activeJobs,    setActiveJobs]    = useState<DbJob[]>([]);
-  const [workerOnline,  setWorkerOnline]  = useState<boolean | null>(null);
-  const [workerStarting, setWorkerStarting] = useState(false);
-  const [showWorkerGuide, setShowWorkerGuide] = useState(false);
+  const [workerOnline,     setWorkerOnline]     = useState<boolean | null>(null);
+  const [workerStarting,   setWorkerStarting]   = useState(false);
+  const [showWorkerGuide,  setShowWorkerGuide]  = useState(false);
+  const [installingStart,  setInstallingStart]  = useState(false);
+  const [startupInstalled, setStartupInstalled] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -387,6 +389,25 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     if (res?.ok) toast.success(`Queued: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
     else         toast.error(`Failed: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
     fetchQueue();
+  };
+
+  const installStartup = async () => {
+    setInstallingStart(true);
+    // First make sure the agent is running
+    const ping = await fetch("http://localhost:7654/ping").catch(() => null);
+    if (!ping?.ok) {
+      toast.error("Agent not running — double-click start-agent.bat first, then try again.");
+      setInstallingStart(false);
+      return;
+    }
+    const r = await fetch("http://localhost:7654/install-startup").catch(() => null);
+    if (r?.ok) {
+      setStartupInstalled(true);
+      toast.success("Installed! Worker will now start automatically on every PC boot.");
+    } else {
+      toast.error("Install failed — check that start-agent.bat is running.");
+    }
+    setInstallingStart(false);
   };
 
   const killJobs = async () => {
@@ -597,10 +618,33 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
           padding: "5px 20px", flexShrink: 0,
           background: "rgba(16,185,129,0.05)",
           borderBottom: "1px solid rgba(16,185,129,0.12)",
-          display: "flex", alignItems: "center", gap: 6,
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
         }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981", flexShrink: 0, display: "inline-block" }} />
-          <span style={{ fontSize: 10, fontWeight: 600, color: "#10b981", letterSpacing: "0.4px" }}>WORKER ONLINE — Ready to render</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981", flexShrink: 0, display: "inline-block" }} />
+            <span style={{ fontSize: 10, fontWeight: 600, color: "#10b981", letterSpacing: "0.4px" }}>WORKER ONLINE — Ready to render</span>
+          </div>
+          {!startupInstalled ? (
+            <button
+              onClick={installStartup}
+              disabled={installingStart}
+              title="Install agent to Windows startup so worker starts automatically on every boot"
+              style={{
+                padding: "3px 10px", borderRadius: 6, flexShrink: 0,
+                border: "1px solid rgba(16,185,129,0.3)",
+                background: "rgba(16,185,129,0.08)", color: "#10b981",
+                fontSize: 10, fontWeight: 700, cursor: installingStart ? "not-allowed" : "pointer",
+                fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4,
+                opacity: installingStart ? 0.6 : 1,
+              }}
+            >
+              {installingStart
+                ? <><Loader2 size={9} style={{ animation: "spin 1s linear infinite" }} /> Installing…</>
+                : <>⚡ Install Auto-Start</>}
+            </button>
+          ) : (
+            <span style={{ fontSize: 10, color: "#10b981", opacity: 0.7 }}>✓ Auto-starts on boot</span>
+          )}
         </div>
       )}
 

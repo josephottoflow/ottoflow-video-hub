@@ -1,12 +1,20 @@
 /**
  * Ottoflow Local Agent
- * Runs silently on port 7654. Lets the Vercel dashboard start/restart
- * the render worker with one button click — no terminal needed.
+ * Runs on port 7654. Lets the Vercel dashboard control the worker
+ * and install itself to Windows startup — all via button clicks.
  */
-const http    = require("http");
+const http = require("http");
 const { spawn } = require("child_process");
+const fs   = require("fs");
+const path = require("path");
 
-const PORT = 7654;
+const PORT    = 7654;
+const PROJ    = __dirname;
+const STARTUP = path.join(
+  process.env.APPDATA || "",
+  "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
+);
+
 let workerProc = null;
 
 function startWorker() {
@@ -14,16 +22,25 @@ function startWorker() {
     try { process.kill(-workerProc.pid); } catch {}
   }
   workerProc = spawn("npm", ["run", "worker"], {
-    cwd:      __dirname,
+    cwd:      PROJ,
     shell:    true,
     detached: true,
     stdio:    "ignore",
   });
   workerProc.unref();
-  console.log("[agent] Worker started (pid " + workerProc.pid + ")");
+  console.log("[agent] Worker started");
 }
 
-// Auto-start worker when agent launches
+function installStartup() {
+  // Write a startup .bat that goes to the project folder and runs the agent
+  const bat = `@echo off\ncd /d "${PROJ}"\nstart /min "" node local-agent.js\n`;
+  const dest = path.join(STARTUP, "ottoflow-agent.bat");
+  fs.writeFileSync(dest, bat);
+  console.log("[agent] Installed to startup: " + dest);
+  return dest;
+}
+
+// Auto-start worker on agent launch
 startWorker();
 
 http.createServer((req, res) => {
@@ -40,6 +57,18 @@ http.createServer((req, res) => {
     return;
   }
 
+  if (req.url === "/install-startup") {
+    try {
+      const dest = installStartup();
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, path: dest }));
+    } catch (e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ ok: false, error: String(e) }));
+    }
+    return;
+  }
+
   if (req.url === "/ping") {
     res.writeHead(200);
     res.end(JSON.stringify({ ok: true }));
@@ -50,6 +79,6 @@ http.createServer((req, res) => {
   res.end(JSON.stringify({ error: "not found" }));
 
 }).listen(PORT, "127.0.0.1", () => {
-  console.log("Ottoflow Local Agent listening on http://localhost:" + PORT);
-  console.log("Worker auto-started. Minimize this window — do not close it.");
+  console.log("Ottoflow Local Agent on http://localhost:" + PORT);
+  console.log("Worker started. Minimize this window — do not close it.");
 });
