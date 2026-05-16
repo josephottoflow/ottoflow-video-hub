@@ -60,7 +60,7 @@ function installStartup() {
       process.env.APPDATA || "",
       "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
     );
-    const bat  = `@echo off\r\ncd /d "${PROJ}"\r\nstart /min "" node local-agent.js\r\n`;
+    const bat  = `@echo off\r\ntitle Ottoflow Agent\r\ncd /d "${PROJ}"\r\nnode local-agent.js\r\necho.\r\necho Agent stopped. Check worker.log for errors.\r\npause\r\n`;
     const dest = path.join(startupDir, "ottoflow-agent.bat");
     fs.writeFileSync(dest, bat);
     console.log("[agent] Installed to Windows startup: " + dest);
