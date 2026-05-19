@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 
 export interface TopicSuggestion {
   topic:       string;
@@ -8,12 +8,11 @@ export interface TopicSuggestion {
 }
 
 export class TopicGeneratorAgent {
-  private client: Anthropic | null;
+  private ai: GoogleGenAI | null;
 
   constructor() {
-    this.client = process.env.ANTHROPIC_API_KEY
-      ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-      : null;
+    const apiKey = process.env.GOOGLE_API_KEY;
+    this.ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
   }
 
   async generateTopics(
@@ -21,7 +20,7 @@ export class TopicGeneratorAgent {
     count         = 15,
     avoidTopics?: string[]
   ): Promise<TopicSuggestion[]> {
-    if (!this.client) throw new Error("ANTHROPIC_API_KEY is not set");
+    if (!this.ai) throw new Error("GOOGLE_API_KEY is not set");
 
     const avoidList = avoidTopics?.length
       ? `\nAVOID these topics (already queued):\n${avoidTopics.slice(0, 30).map(t => `- ${t}`).join("\n")}`
@@ -51,19 +50,15 @@ Output ONLY valid JSON — an array of exactly ${count} objects:
   }
 ]`;
 
-    const message = await this.client.messages.create({
-      model:      "claude-sonnet-4-6",
-      max_tokens: 4096,
-      messages:   [{ role: "user", content: prompt }],
+    const response = await this.ai.models.generateContent({
+      model:    "gemini-2.0-flash",
+      contents: prompt,
     });
 
-    const text = message.content[0];
-    if (text.type !== "text") throw new Error("Unexpected Claude response");
-
-    const raw  = text.text.trim().replace(/^```json?\n?/, "").replace(/\n?```$/, "");
+    const raw = (response.text ?? "").trim().replace(/^```json?\n?/, "").replace(/\n?```$/, "");
     const data = JSON.parse(raw);
 
-    if (!Array.isArray(data)) throw new Error("Expected JSON array from Claude");
+    if (!Array.isArray(data)) throw new Error("Expected JSON array from Gemini");
     return data as TopicSuggestion[];
   }
 }
