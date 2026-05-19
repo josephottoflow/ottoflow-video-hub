@@ -15,7 +15,7 @@ import { DesignAgent } from "../design/design-agent";
 import { ScriptWriterAgent } from "../scriptwriter/scriptwriter-agent";
 import { sanitizeScript } from "../scriptwriter/scriptwriter-agent";
 import type { HookStyle, RenderVariant } from "../scriptwriter/scriptwriter-agent";
-import { StoryboardAgent } from "../storyboard/storyboard-agent";
+// StoryboardAgent is V2-only; V1 uses inline Pexels query logic
 import { FFmpegAgent } from "../ffmpeg/ffmpeg-agent";
 import { BrandingAgent } from "../branding/branding-agent";
 import { MusicAgent } from "../music/music-agent";
@@ -51,7 +51,6 @@ export class PipelineOrchestrator {
   private seoGenerator   = new SeoGenerator();
   private designAgent    = new DesignAgent();
   private scriptWriter   = new ScriptWriterAgent();
-  private storyboard     = new StoryboardAgent();
   private ffmpeg         = new FFmpegAgent();
   private branding       = new BrandingAgent();
   private music          = new MusicAgent();
@@ -173,11 +172,9 @@ export class PipelineOrchestrator {
       console.log(`[${slug}] Design: ${design.theme} theme / ${design.mood} mood — ${design.rationale}`);
       console.log(`[${slug}] Branding: Ottoflow palette applied — ${design.brandColors.primary} / CTA: "${this.branding.getCta(row.style)}"`);
 
-      // ── 2. Generate storyboard (shot plan + visual consistency) ─
+      // ── 2. Derive Pexels query terms from topic/style ────────────────
       setStatus("running", row.topic, 20);
-      console.log(`[${slug}] Generating storyboard...`);
-      const storyboard = await this.storyboard.generate(row, design);
-      console.log(`[${slug}] Storyboard: ${storyboard.narrativeArc}`);
+      console.log(`[${slug}] Building shot plan...`);
 
       // ── 3. Select background music ───────────────────────────
       setStatus("running", row.topic, 30);
@@ -196,18 +193,16 @@ export class PipelineOrchestrator {
         if (voiceoverPath) console.log(`[${slug}] Voiceover ready`);
       }
 
-      // ── 5. Fetch Pexels backgrounds (guided by storyboard queries) ─
+      // ── 5. Fetch Pexels backgrounds ──────────────────────────────────
       setStatus("running", row.topic, 40);
-      const pexelsQueries = this.storyboard.getPexelsQueries(storyboard);
-      const primaryQuery  = pexelsQueries[0] || row.topic;
-      const backgrounds   = await this.fetchBackgrounds(primaryQuery, row.style, slug, pexelsQueries);
+      const primaryQuery = row.topic;
+      const backgrounds  = await this.fetchBackgrounds(primaryQuery, row.style, slug, [row.topic]);
       console.log(`[${slug}] Backgrounds: ${backgrounds.photos.length} photos, ${backgrounds.videos.length} videos`);
 
-      // ── 6. Build video data (storyboard + design tokens) ─────
+      // ── 6. Build video data (design tokens + Claude prompt) ────────────
       setStatus("running", row.topic, 50);
       console.log(`[${slug}] Generating video structure with Claude...`);
-      const storyboardContext = this.storyboard.toPromptContext(storyboard);
-      const videoData = await this.promptEngine.generateFromContent(row, slug, backgrounds, storyboardContext);
+      const videoData = await this.promptEngine.generateFromContent(row, slug, backgrounds, "");
 
       // Override brand colors with Ottoflow brand (via Design Agent → BrandingAgent)
       videoData.brandColors = {

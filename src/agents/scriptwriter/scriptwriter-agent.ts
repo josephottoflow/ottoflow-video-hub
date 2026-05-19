@@ -1,8 +1,8 @@
 /**
  * SCRIPT WRITER AGENT — Generates missing scripts for Google Sheets rows
  *
- * Uses Claude to write engaging short-form video scripts from topic,
- * style, and optional hook lines. Also generates 3 hook variations.
+ * Uses Gemini 2.0 Flash to write engaging short-form video scripts from
+ * topic, style, and optional hook lines. Also generates 3 hook variations.
  *
  * Pipeline integration:
  *   1. fillMissingScripts() — scans sheet, writes scripts for empty rows
@@ -10,7 +10,7 @@
  *   3. generateHooks() — 3 attention-grabbing hook variations
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 import type { ContentRow } from "../sheets/client";
 
 // ─── Types ───────────────────────────────────────────────────
@@ -128,13 +128,12 @@ const VARIANT_ARC: Record<RenderVariant, string> = {
 // ─── Script Writer Agent ──────────────────────────────────────
 
 export class ScriptWriterAgent {
-  private client: Anthropic | null;
+  private ai: GoogleGenAI | null;
   private tasks: ScriptTask[] = [];
 
   constructor() {
-    this.client = process.env.ANTHROPIC_API_KEY
-      ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-      : null;
+    const apiKey = process.env.GOOGLE_API_KEY;
+    this.ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
   }
 
   /**
@@ -148,11 +147,11 @@ export class ScriptWriterAgent {
     hookStyle: HookStyle = "question",
     renderVariant?: RenderVariant
   ): Promise<GeneratedScript> {
-    if (!this.client) throw new Error("ANTHROPIC_API_KEY is not set");
-    const toneGuide      = STYLE_TONE[style.toLowerCase()] || STYLE_TONE.educational;
-    const hookGuide      = HOOK_STYLE_GUIDE[hookStyle];
-    const hookHints      = [existingHooks?.a, existingHooks?.b, existingHooks?.c].filter(Boolean).join(", ");
-    const arc            = renderVariant ? VARIANT_ARC[renderVariant] : STORY_ARC;
+    if (!this.ai) throw new Error("GOOGLE_API_KEY is not set");
+    const toneGuide = STYLE_TONE[style.toLowerCase()] || STYLE_TONE.educational;
+    const hookGuide = HOOK_STYLE_GUIDE[hookStyle];
+    const hookHints = [existingHooks?.a, existingHooks?.b, existingHooks?.c].filter(Boolean).join(", ");
+    const arc       = renderVariant ? VARIANT_ARC[renderVariant] : STORY_ARC;
 
     const prompt = `You are an elite short-form video scriptwriter for TikTok and Instagram Reels.
 
@@ -181,22 +180,18 @@ Structural rules:
 - Spoken-word only — no bullet points, no headers, no markdown
 - If you produce an em-dash anywhere, you have failed the task`;
 
-    const message = await this.client.messages.create({
-      model:      "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
-      messages:   [{ role: "user", content: prompt }],
+    const response = await this.ai.models.generateContent({
+      model:    "gemini-2.0-flash",
+      contents: prompt,
     });
 
-    const text = message.content[0];
-    if (text.type !== "text") throw new Error("Unexpected Claude response");
-
-    const raw  = text.text.trim().replace(/^```json?\n?/, "").replace(/\n?```$/, "");
+    const raw  = (response.text ?? "").trim().replace(/^```json?\n?/, "").replace(/\n?```$/, "");
     const data = JSON.parse(raw);
 
-    const script = humanize(data.script    || "");
-    const hookA  = humanize(data.hookA     || data.hook_a || "");
-    const hookB  = humanize(data.hookB     || data.hook_b || "");
-    const hookC  = humanize(data.hookC     || data.hook_c || "");
+    const script = humanize(data.script || "");
+    const hookA  = humanize(data.hookA  || data.hook_a || "");
+    const hookB  = humanize(data.hookB  || data.hook_b || "");
+    const hookC  = humanize(data.hookC  || data.hook_c || "");
 
     return {
       script,
@@ -211,7 +206,7 @@ Structural rules:
    * Generate only 3 hook variations (faster — used when script exists).
    */
   async generateHooks(topic: string, style: string): Promise<{ a: string; b: string; c: string }> {
-    if (!this.client) throw new Error("ANTHROPIC_API_KEY is not set");
+    if (!this.ai) throw new Error("GOOGLE_API_KEY is not set");
     const prompt = `Generate 3 scroll-stopping video hooks for this topic.
 
 TOPIC: ${topic}
@@ -226,15 +221,11 @@ Output ONLY valid JSON:
   "c": "Direct you-challenge, max 8 words, no em-dashes"
 }`;
 
-    const message = await this.client.messages.create({
-      model:      "claude-haiku-4-5-20251001",
-      max_tokens: 256,
-      messages:   [{ role: "user", content: prompt }],
+    const response = await this.ai.models.generateContent({
+      model:    "gemini-2.0-flash",
+      contents: prompt,
     });
-
-    const text = message.content[0];
-    if (text.type !== "text") throw new Error("Unexpected response");
-    const raw  = text.text.trim().replace(/^```json?\n?/, "").replace(/\n?```$/, "");
+    const raw  = (response.text ?? "").trim().replace(/^```json?\n?/, "").replace(/\n?```$/, "");
     const data = JSON.parse(raw);
     return {
       a: humanize(data.a || ""),

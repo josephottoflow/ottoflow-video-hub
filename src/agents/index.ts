@@ -57,9 +57,9 @@ export { reviewFrames, preRenderCheck } from "./review/review-agent";
 export { DesignAgent } from "./design/design-agent";
 export type { DesignSpec, ThemePreset, OverlayStyle, FontWeight, TextEffect, Mood, DesignAgentTask } from "./design/design-agent";
 
-// Storyboard Agent
+// Storyboard Agent (V2 Dynamic Engine)
 export { StoryboardAgent } from "./storyboard/storyboard-agent";
-export type { Storyboard, StoryboardShot, VisualTheme, ShotPurpose } from "./storyboard/storyboard-agent";
+export type { Storyboard, StoryboardScene, VisualStyle, CaptionStyle, MusicMood, SceneBeat } from "./storyboard/storyboard-agent";
 
 // FFmpeg Post-Processor
 export { FFmpegAgent } from "./ffmpeg/ffmpeg-agent";

@@ -98,7 +98,7 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
   let result;
   try {
     result = version === "v2"
-      ? await new PipelineOrchestratorV2().processSingleByRowIndex(rowIndex)
+      ? await new PipelineOrchestratorV2().processSingleByRowIndex(rowIndex, renderVariant as any, hookStyle as any, dbJobId)
       : await new PipelineOrchestrator().processSingleByRowIndex(rowIndex, template, renderVariant as any, hookStyle as any);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown pipeline error";
@@ -174,7 +174,11 @@ async function startup() {
   // Write a heartbeat to Postgres every 30s so /api/worker-status can detect us reliably.
   // BullMQ's own heartbeat expires during long renders; this one doesn't.
   await touchWorkerHeartbeat();
-  const heartbeatInterval = setInterval(touchWorkerHeartbeat, 30_000);
+  const heartbeatInterval = setInterval(() => {
+    touchWorkerHeartbeat().catch((e) =>
+      console.warn("[worker] heartbeat failed:", e instanceof Error ? e.message : e)
+    );
+  }, 30_000);
 
   const worker = new Worker<RenderJobData>(RENDER_QUEUE, processJob, {
     connection:    redisConnection,

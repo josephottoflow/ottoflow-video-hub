@@ -30,6 +30,7 @@ export async function GET() {
 
   return NextResponse.json({
     anthropic:   !!process.env.ANTHROPIC_API_KEY,
+    gemini:      !!process.env.GOOGLE_API_KEY,
     elevenlabs:  !!process.env.ELEVENLABS_API_KEY,
     pexels:      !!process.env.PEXELS_API_KEY,
     telegram:    !!process.env.TELEGRAM_BOT_TOKEN,
@@ -38,6 +39,6 @@ export async function GET() {
     ffmpeg:      checkFfmpeg(),
     remotion:    true,
     branding:    true,
-    jamendo:     true, // Pixabay music — no key required
+    jamendo:     true,
   });
 }

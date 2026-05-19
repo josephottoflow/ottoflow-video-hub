@@ -122,11 +122,12 @@ export class TelegramApprovalBot {
     slug?: string
   ): Promise<void> {
     const caption  = this.buildDeliveryCaption(topic, hooks, hashtags);
-    const jobSlug  = slug || topic.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const fullSlug = slug || topic.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const cbSlug   = fullSlug.slice(0, 55);
     const markup   = {
       inline_keyboard: [[
-        { text: "✅ Approve", callback_data: `approve:${jobSlug}` },
-        { text: "❌ Reject",  callback_data: `reject:${jobSlug}`  },
+        { text: "✅ Approve", callback_data: `approve:${cbSlug}` },
+        { text: "❌ Reject",  callback_data: `reject:${cbSlug}`  },
       ]],
     };
 
@@ -148,36 +149,33 @@ export class TelegramApprovalBot {
     jobSlug:   string
   ): Promise<ApprovalResult> {
     const startTime = Date.now();
-    const caption   = `🎬 *V2 REVIEW*\n\n📹 ${this.escapeMarkdown(topic)}\n\n👇 Approve or reject:`;
 
+    // Step 1: Upload the video without any buttons (avoids BUTTON_DATA_INVALID on FormData)
     const formData = new FormData();
     const buffer   = fs.readFileSync(videoPath);
     const blob     = new Blob([buffer], { type: "video/mp4" });
+    const caption  = `🎬 *V2 REVIEW*\n\n📹 ${this.escapeMarkdown(topic)}`;
 
     formData.append("chat_id",    this.chatId);
-    formData.append("video",      blob, `${jobSlug}.mp4`);
+    formData.append("video",      blob, "video.mp4");
     formData.append("caption",    caption);
     formData.append("parse_mode", "Markdown");
     formData.append("supports_streaming", "true");
-    formData.append(
-      "reply_markup",
-      JSON.stringify({
-        inline_keyboard: [[
-          { text: "✅ Approve", callback_data: `approve:${jobSlug}` },
-          { text: "❌ Reject",  callback_data: `reject:${jobSlug}`  },
-          { text: "🔄 Retry",  callback_data: `retry:${jobSlug}`   },
-        ]],
-      })
+
+    const videoRes  = await fetch(`${TELEGRAM_API}${this.botToken}/sendVideo`, { method: "POST", body: formData });
+    const videoData = await videoRes.json() as { ok: boolean; result?: { message_id: number }; description?: string };
+    if (!videoData.ok) throw new Error(`sendVideo failed: ${videoData.description}`);
+    console.log(`[telegram] V2 video sent for "${topic}" (msg ${videoData.result!.message_id})`);
+
+    // Step 2: Send approval buttons in a separate text message (no file upload = no FormData issues)
+    const cbSlug = jobSlug.slice(0, 55);
+    const buttonMsgId = await this.sendTextWithButtons(
+      `👇 *Approve or reject:*\n\n_${this.escapeMarkdown(topic)}_`,
+      cbSlug
     );
+    console.log(`[telegram] Approval buttons sent (msg ${buttonMsgId})`);
 
-    const res  = await fetch(`${TELEGRAM_API}${this.botToken}/sendVideo`, { method: "POST", body: formData });
-    const data = await res.json() as { ok: boolean; result?: { message_id: number }; description?: string };
-    if (!data.ok) throw new Error(`sendVideo failed: ${data.description}`);
-
-    const messageId = data.result!.message_id;
-    console.log(`[telegram] V2 approval sent for "${topic}" (msg ${messageId})`);
-
-    const decision   = await this.pollForDecision(jobSlug, messageId);
+    const decision   = await this.pollForDecision(cbSlug, buttonMsgId);
     const waitTimeMs = Date.now() - startTime;
 
     const statusMsg = decision === "approved"
@@ -395,39 +393,30 @@ export class TelegramApprovalBot {
     callbackQueryId: string,
     text: string
   ): Promise<void> {
-    await fetch(
-      `${TELEGRAM_API}${this.botToken}/answerCallbackQuery`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          callback_query_id: callbackQueryId,
-          text,
-        }),
-      }
-    );
+    const res  = await fetch(`${TELEGRAM_API}${this.botToken}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callback_query_id: callbackQueryId, text }),
+    });
+    const data = await res.json() as { ok: boolean; description?: string };
+    if (!data.ok) throw new Error(`answerCallbackQuery failed: ${data.description}`);
   }
 
   private async editMessageButtons(
     messageId: number,
     statusText: string
   ): Promise<void> {
-    await fetch(
-      `${TELEGRAM_API}${this.botToken}/editMessageReplyMarkup`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: this.chatId,
-          message_id: messageId,
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: statusText, callback_data: "noop" }],
-            ],
-          },
-        }),
-      }
-    );
+    const res  = await fetch(`${TELEGRAM_API}${this.botToken}/editMessageReplyMarkup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id:      this.chatId,
+        message_id:   messageId,
+        reply_markup: { inline_keyboard: [[{ text: statusText, callback_data: "noop" }]] },
+      }),
+    });
+    const data = await res.json() as { ok: boolean; description?: string };
+    if (!data.ok) throw new Error(`editMessageReplyMarkup failed: ${data.description}`);
   }
 
   // === Video Delivery ===

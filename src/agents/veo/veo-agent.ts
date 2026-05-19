@@ -30,11 +30,11 @@ const SCENE_DURATIONS: Array<{ beat: "hook" | "insight" | "cta"; durationS: numb
   { beat: "cta",     durationS: 5 },
 ];
 
-// Text-to-video durations — shorter clips that loop in Remotion
+// Text-to-video durations — all 8s (veo-3.1-lite-preview only accepts 4–8; 8 is safest)
 const TEXT_SCENE_DURATIONS: Array<{ beat: "hook" | "insight" | "cta"; durationS: number }> = [
-  { beat: "hook",    durationS: 5 },
+  { beat: "hook",    durationS: 8 },
   { beat: "insight", durationS: 8 },
-  { beat: "cta",     durationS: 5 },
+  { beat: "cta",     durationS: 8 },
 ];
 
 export class VeoAgent {
@@ -47,6 +47,25 @@ export class VeoAgent {
 
   static isAvailable(): boolean {
     return !!process.env.GOOGLE_API_KEY;
+  }
+
+  /**
+   * Generate a single clip from a text prompt. Returns the output path on success, null on failure.
+   * durationS is clamped to [4, 8] by the caller (Veo API constraint).
+   */
+  async generateSingleClip(
+    prompt:    string,
+    outPath:   string,
+    durationS: number
+  ): Promise<string | null> {
+    if (!this.ai) return null;
+    if (fs.existsSync(outPath)) return outPath;
+    try {
+      return await this.generateFromText(prompt, outPath, durationS);
+    } catch (err) {
+      console.error(`[veo] generateSingleClip failed: ${err instanceof Error ? err.message : err}`);
+      return null;
+    }
   }
 
   async animateScenes(
@@ -138,10 +157,9 @@ export class VeoAgent {
       model:  VEO_MODEL,
       prompt: `${prompt}. Slow cinematic camera movement, smooth motion, dramatic lighting, photorealistic 9:16 portrait, no text overlays.`,
       config: {
-        numberOfVideos:   1,
-        durationSeconds:  durationS,
-        aspectRatio:      "9:16",
-        personGeneration: "allow_adult",
+        numberOfVideos:  1,
+        durationSeconds: durationS,
+        aspectRatio:     "9:16",
       },
     });
 
@@ -186,10 +204,9 @@ export class VeoAgent {
       prompt: `${prompt}. Slow cinematic camera movement, smooth motion, dramatic lighting, photorealistic, no text overlays.`,
       image: { imageBytes, mimeType: "image/jpeg" },
       config: {
-        numberOfVideos:   1,
-        durationSeconds:  durationS,
-        aspectRatio:      "9:16",
-        personGeneration: "allow_adult",
+        numberOfVideos:  1,
+        durationSeconds: durationS,
+        aspectRatio:     "9:16",
       },
     });
 

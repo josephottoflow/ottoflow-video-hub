@@ -7,7 +7,7 @@
  *  - The one key word from the caption highlighted in yellow
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 
 export interface ScenePromptSet {
   hook:    ScenePrompt;
@@ -35,11 +35,11 @@ Rules:
 Return JSON only.`;
 
 export class ImagePromptAgent {
-  private client: Anthropic | null;
+  private ai: GoogleGenAI | null;
 
   constructor() {
-    const key = process.env.ANTHROPIC_API_KEY;
-    this.client = key ? new Anthropic({ apiKey: key }) : null;
+    const apiKey = process.env.GOOGLE_API_KEY;
+    this.ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
   }
 
   async generateScenePrompts(
@@ -47,11 +47,13 @@ export class ImagePromptAgent {
     script:  string,
     style:   string
   ): Promise<ScenePromptSet> {
-    if (!this.client) {
+    if (!this.ai) {
       return this.fallbackPrompts(topic);
     }
 
-    const prompt = `Topic: "${topic}"
+    const prompt = `${SYSTEM}
+
+Topic: "${topic}"
 Style: ${style}
 Script: "${script}"
 
@@ -68,19 +70,16 @@ Return this JSON:
 }`;
 
     try {
-      const res = await this.client.messages.create({
-        model:      "claude-haiku-4-5-20251001",
-        max_tokens: 800,
-        system:     SYSTEM,
-        messages:   [{ role: "user", content: prompt }],
+      const response = await this.ai.models.generateContent({
+        model:    "gemini-2.0-flash",
+        contents: prompt,
       });
-
-      const text = res.content[0].type === "text" ? res.content[0].text : "";
+      const text = response.text ?? "";
       const json = text.match(/\{[\s\S]*\}/)?.[0];
       if (!json) throw new Error("No JSON in response");
       return JSON.parse(json) as ScenePromptSet;
     } catch (err) {
-      console.warn("[image-prompt] Claude failed, using fallback:", err instanceof Error ? err.message : err);
+      console.warn("[image-prompt] Gemini failed, using fallback:", err instanceof Error ? err.message : err);
       return this.fallbackPrompts(topic);
     }
   }

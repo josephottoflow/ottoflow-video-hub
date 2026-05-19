@@ -1,12 +1,13 @@
 /**
  * POST /api/topics
- * Add one or more topics to Sheet1 and optionally queue a render job for each.
+ * Add one or more topics to Sheet1 (v1) or Sheet2 (v2) and optionally queue a render job.
  *
  * Body: {
- *   topics:    string[];          // one topic per element
- *   style?:    string;            // default "Educational"
- *   voice?:    string;            // default "Female energetic"
- *   autoQueue?: boolean;          // default true — also enqueue a render job
+ *   topics:     string[];          // one topic per element
+ *   style?:     string;            // default "Educational"
+ *   voice?:     string;            // default "Female energetic"
+ *   autoQueue?: boolean;           // default true
+ *   version?:   "v1" | "v2";      // default "v1" — "v2" targets Sheet2 + Advanced pipeline
  * }
  */
 
@@ -29,12 +30,14 @@ export async function POST(req: Request) {
     const style     = (body.style  as string | undefined)?.trim() || "Educational";
     const voice     = (body.voice  as string | undefined)?.trim() || "Female energetic";
     const autoQueue = body.autoQueue !== false;
+    const version   = (body.version as string | undefined) === "v2" ? "v2" : "v1";
 
     if (topics.length === 0) {
       return NextResponse.json({ error: "topics array is required and must not be empty" }, { status: 400 });
     }
 
-    const sheets = new SheetsClient();
+    const sheetName = version === "v2" ? "Video Gen" : undefined;
+    const sheets    = new SheetsClient(sheetName);
     await sheets.initializeSheet();
 
     const results: { rowIndex: number; topic: string; jobId?: string; template?: string }[] = [];
@@ -43,16 +46,24 @@ export async function POST(req: Request) {
       const rowIndex = await sheets.addContent({ topic, style, voice });
 
       if (autoQueue) {
-        const recentTemplates = await getLastTemplatesForTopic(topic);
-        const template        = await RenderAgent.selectTemplate(topic, style, recentTemplates);
-        const renderVariant   = rand(ALL_VARIANTS);
-        const hookStyle       = rand(ALL_HOOK_STYLES);
+        const renderVariant = rand(ALL_VARIANTS);
+        const hookStyle     = rand(ALL_HOOK_STYLES);
 
         await upsertContentRow({ row_index: rowIndex, topic, style, voice });
-        const job = await createJob(rowIndex, topic, template);
-        await enqueueRender({ rowIndex, template, topic, dbJobId: job.id, renderVariant, hookStyle });
-        await sheets.updateStatus(rowIndex, "Queued");
-        results.push({ rowIndex, topic, jobId: job.id, template });
+
+        if (version === "v2") {
+          const job = await createJob(rowIndex, topic, "v2-ugc");
+          await enqueueRender({ rowIndex, template: "v2-ugc", topic, dbJobId: job.id, version: "v2", sheetName: "Video Gen", renderVariant, hookStyle });
+          await sheets.updateStatus(rowIndex, "Queued");
+          results.push({ rowIndex, topic, jobId: job.id, template: "v2-ugc" });
+        } else {
+          const recentTemplates = await getLastTemplatesForTopic(topic);
+          const template        = await RenderAgent.selectTemplate(topic, style, recentTemplates);
+          const job = await createJob(rowIndex, topic, template);
+          await enqueueRender({ rowIndex, template, topic, dbJobId: job.id, renderVariant, hookStyle });
+          await sheets.updateStatus(rowIndex, "Queued");
+          results.push({ rowIndex, topic, jobId: job.id, template });
+        }
       } else {
         results.push({ rowIndex, topic });
       }
@@ -62,6 +73,7 @@ export async function POST(req: Request) {
       success: true,
       added:   topics.length,
       queued:  autoQueue ? topics.length : 0,
+      version,
       jobs:    results,
     });
   } catch (err) {

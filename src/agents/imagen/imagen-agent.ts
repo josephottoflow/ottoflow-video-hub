@@ -4,7 +4,7 @@
  * Uses GOOGLE_API_KEY (already in .env) — no new signup needed.
  * Generates one 9:16 portrait image per scene, saves to temp/{slug}/
  *
- * Model: imagen-3.0-generate-001
+ * Model: imagen-3.0-generate-002
  */
 
 import { GoogleGenAI } from "@google/genai";
@@ -26,6 +26,29 @@ export class Imagen3Agent {
 
   static isAvailable(): boolean {
     return !!process.env.GOOGLE_API_KEY;
+  }
+
+  /**
+   * Generate a single image from a text prompt. Returns the output path on success, null on failure.
+   */
+  async generateSingleImage(prompt: string, outPath: string): Promise<string | null> {
+    if (!this.ai) return null;
+    if (fs.existsSync(outPath)) return outPath;
+    try {
+      const response = await this.ai.models.generateImages({
+        model:  "imagen-3.0-generate-002",
+        prompt: this.enhancePrompt(prompt),
+        config: { numberOfImages: 1, aspectRatio: "9:16", outputMimeType: "image/jpeg" },
+      });
+      const image = response.generatedImages?.[0];
+      if (!image?.image?.imageBytes) throw new Error("No image bytes returned");
+      fs.mkdirSync(path.dirname(outPath), { recursive: true });
+      fs.writeFileSync(outPath, Buffer.from(image.image.imageBytes, "base64"));
+      return outPath;
+    } catch (err) {
+      console.error(`[imagen3] generateSingleImage failed: ${err instanceof Error ? err.message : err}`);
+      return null;
+    }
   }
 
   async generateSceneImages(
@@ -65,7 +88,7 @@ export class Imagen3Agent {
     tempDir: string
   ): Promise<string> {
     const response = await this.ai!.models.generateImages({
-      model:  "imagen-3.0-generate-001",
+      model:  "imagen-3.0-generate-002",
       prompt: this.enhancePrompt(prompt),
       config: {
         numberOfImages:  1,

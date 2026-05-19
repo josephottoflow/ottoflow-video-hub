@@ -12,8 +12,14 @@ import { SheetsClient }              from "@/agents/sheets/client";
 import { createJob, upsertContentRow } from "@/lib/db";
 import { enqueueRender }             from "@/lib/queue";
 import { emitLog, setStatus, clearLogs } from "@/lib/pipeline-store";
+import type { RenderVariant, HookStyle } from "@/agents/scriptwriter/scriptwriter-agent";
 
-const SHEET_NAME = "Sheet2";
+const VARIANTS: RenderVariant[]  = ["problem-first", "stat-first", "story-arc", "myth-bust"];
+const HOOK_STYLES: HookStyle[]   = ["question", "bold-statement", "conflict", "promise", "shock", "story"];
+function randomVariant()   { return VARIANTS[Math.floor(Math.random() * VARIANTS.length)]; }
+function randomHookStyle() { return HOOK_STYLES[Math.floor(Math.random() * HOOK_STYLES.length)]; }
+
+const SHEET_NAME = "Video Gen";
 
 export async function POST(req: NextRequest) {
   const body           = await req.json().catch(() => ({})) as { rowIndex?: number };
@@ -40,7 +46,7 @@ export async function POST(req: NextRequest) {
       });
 
       const job = await createJob(row.rowIndex, row.topic, "v2-ugc");
-      await enqueueRender({ rowIndex: row.rowIndex, template: "v2-ugc", topic: row.topic, dbJobId: job.id, version: "v2", sheetName: SHEET_NAME });
+      await enqueueRender({ rowIndex: row.rowIndex, template: "v2-ugc", topic: row.topic, dbJobId: job.id, version: "v2", sheetName: SHEET_NAME, renderVariant: randomVariant(), hookStyle: randomHookStyle() });
       await sheets.updateStatus(row.rowIndex, "Queued");
 
       setStatus("running", row.topic, 10);
@@ -64,7 +70,7 @@ export async function POST(req: NextRequest) {
         });
 
         const job = await createJob(row.rowIndex, row.topic, "v2-ugc");
-        await enqueueRender({ rowIndex: row.rowIndex, template: "v2-ugc", topic: row.topic, dbJobId: job.id, version: "v2", sheetName: SHEET_NAME });
+        await enqueueRender({ rowIndex: row.rowIndex, template: "v2-ugc", topic: row.topic, dbJobId: job.id, version: "v2", sheetName: SHEET_NAME, renderVariant: randomVariant(), hookStyle: randomHookStyle() });
         await sheets.updateStatus(row.rowIndex, "Queued");
         jobs.push({ id: job.id, topic: row.topic });
         emitLog("V2-Orchestrator", `Queued V2: ${row.topic}`, "info");
@@ -76,7 +82,7 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    setStatus("error");
+    setStatus("error", "", 0);
     emitLog("V2-Orchestrator", `Fatal: ${message}`, "error");
     return NextResponse.json({ error: message }, { status: 500 });
   }

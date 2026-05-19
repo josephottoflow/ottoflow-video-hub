@@ -1,4 +1,4 @@
-// v2 — Single V2 scene: Veo video clip (preferred) or AI image + Ken Burns zoom + gradient + caption
+// v2 — Single V2 scene: Veo clip (preferred) or AI image + Ken Burns + gradient + dynamic caption
 // Must be used inside a <Sequence> — useCurrentFrame() is already relative
 
 import React from "react";
@@ -14,6 +14,9 @@ interface V2SceneProps {
   durationFrames:  number;
   zoomDirection?:  "in" | "out" | "pan";
   overlayOpacity?: number;
+  captionStyle?:   "impact" | "word-by-word" | "slide-up" | "pulse";
+  highlightColor?: string;
+  overlayColor?:   string;   // "r,g,b" string
 }
 
 export const V2Scene: React.FC<V2SceneProps> = ({
@@ -24,6 +27,9 @@ export const V2Scene: React.FC<V2SceneProps> = ({
   durationFrames,
   zoomDirection  = "in",
   overlayOpacity = 0.45,
+  captionStyle   = "impact",
+  highlightColor = "#FFE500",
+  overlayColor   = "0,0,0",
 }) => {
   const frame    = useCurrentFrame(); // relative to Sequence — 0 at scene start
   const progress = Math.min(frame / durationFrames, 1);
@@ -78,21 +84,27 @@ export const V2Scene: React.FC<V2SceneProps> = ({
         </AbsoluteFill>
       )}
 
-      {/* Gradient overlay — center-focused for caption legibility */}
+      {/* Gradient overlay — color driven by visual style */}
       <AbsoluteFill
         style={{
           background: `linear-gradient(
             to bottom,
-            rgba(0,0,0,0.25) 0%,
-            rgba(0,0,0,${overlayOpacity * 0.9}) 35%,
-            rgba(0,0,0,${overlayOpacity * 0.9}) 65%,
-            rgba(0,0,0,0.25) 100%
+            rgba(${overlayColor},0.2) 0%,
+            rgba(${overlayColor},${overlayOpacity}) 30%,
+            rgba(${overlayColor},${overlayOpacity}) 70%,
+            rgba(${overlayColor},0.2) 100%
           )`,
         }}
       />
 
-      {/* Caption — frame is relative here too, inside the same Sequence */}
-      <V2Caption caption={caption} keyWord={keyWord} />
+      {/* Caption — style, highlight, and duration passed through */}
+      <V2Caption
+        caption={caption}
+        keyWord={keyWord}
+        highlightColor={highlightColor}
+        style={captionStyle}
+        durationFrames={durationFrames}
+      />
     </AbsoluteFill>
   );
 };

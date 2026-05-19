@@ -22,7 +22,7 @@ type Tier   = "basic" | "advanced";
 interface LogEntry { id: number; ts: string; agent: string; message: string; level: string; }
 interface QueueRow { rowIndex: number; topic: string; style: string; status: string; avatarUrl?: string; }
 interface DbJob { id: string; topic: string; template: string; status: string; error?: string; output_link?: string; duration_ms?: number; started_at?: string; }
-interface Services { anthropic: boolean; pexels: boolean; telegram: boolean; sheets: boolean; n8n: boolean; ffmpeg: boolean; remotion: boolean; branding: boolean; jamendo: boolean; }
+interface Services { anthropic: boolean; gemini: boolean; elevenlabs: boolean; pexels: boolean; telegram: boolean; sheets: boolean; n8n: boolean; ffmpeg: boolean; remotion: boolean; branding: boolean; jamendo: boolean; }
 
 // ─── Pipeline definition ──────────────────────────────────────
 
@@ -42,10 +42,10 @@ const PIPELINE_AGENTS = [
 ];
 
 const V2_PIPELINE_AGENTS = [
-  { id: "Sheets Client",    label: "Sheets",       Icon: FileSpreadsheet, desc: "Reads Sheet2 rows" },
+  { id: "Sheets Client",    label: "Sheets",       Icon: FileSpreadsheet, desc: "Reads Video Gen rows" },
   { id: "V2-Orchestrator",  label: "Script",       Icon: Wand2,           desc: "32-word script" },
   { id: "V2-Orchestrator",  label: "Voiceover",    Icon: Activity,        desc: "ElevenLabs TTS" },
-  { id: "V2-Orchestrator",  label: "Image Prompt", Icon: Zap,             desc: "Scene prompts via Claude" },
+  { id: "V2-Orchestrator",  label: "Image Prompt", Icon: Zap,             desc: "Scene prompts via Gemini" },
   { id: "V2-Orchestrator",  label: "Veo 3.1 Lite", Icon: Video,           desc: "AI text-to-video" },
   { id: "V2-Orchestrator",  label: "Music",        Icon: Music2,          desc: "Pixabay track" },
   { id: "V2-Orchestrator",  label: "Render",       Icon: Clapperboard,    desc: "Remotion 20s render" },
@@ -81,8 +81,8 @@ function levelColor(level: string) {
   return "var(--text-secondary)";
 }
 
-function stripSlugPrefix(msg: string) {
-  return msg.replace(/^\[[\w-]+\]\s*/, "");
+function stripSlugPrefix(msg: string | undefined): string {
+  return (msg ?? "").replace(/^\[[\w-]+\]\s*/, "");
 }
 
 // ─── Status Pill ──────────────────────────────────────────────
@@ -227,7 +227,7 @@ function Sidebar({ view, setView, pipeStatus, activeAgent, tier, setTier }: {
               <div>
                 <div>{t === "advanced" ? "Advanced" : "Basic"}</div>
                 <div style={{ fontSize: 9, fontWeight: 500, color: "var(--text-muted)", marginTop: 1 }}>
-                  {t === "advanced" ? "Veo · Sheet2" : "Pexels · Sheet1"}
+                  {t === "advanced" ? "Veo · Video Gen" : "Pexels · Sheet1"}
                 </div>
               </div>
               {tier === t && <CheckCircle2 size={12} style={{ marginLeft: "auto", flexShrink: 0 }} color={t === "advanced" ? "#a78bfa" : "var(--text-muted)"} />}
@@ -360,7 +360,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
         setWorkerRestarting(restarting);
         if (!alive && !restarting) {
           const lr = await fetch("http://localhost:7654/logs").catch(() => null);
-          if (lr?.ok) { const ld = await lr.json().catch(() => ({})); setWorkerLogs(ld.lines ?? []); }
+          if (lr?.ok) { const ld = await lr.json().catch(() => ({})); setWorkerLogs(Array.isArray(ld.lines) ? ld.lines : []); }
         }
         return;
       }
@@ -897,7 +897,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
           {activeJobs.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {activeJobs.map(job => {
-                const startedAt = job.started_at ? new Date(job.started_at) : null;
+                const startedAt = job.started_at ? (() => { const d = new Date(job.started_at!); return isNaN(d.getTime()) ? null : d; })() : null;
                 const minAgo    = startedAt ? Math.floor((Date.now() - startedAt.getTime()) / 60000) : 0;
                 const isStuck   = job.status === "processing" && minAgo >= 5;
                 const color     = isStuck ? "#f43f5e" : "#a78bfa";
@@ -1118,7 +1118,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
         </div>
 
         {/* RIGHT: Live log */}
-        <div style={{ borderLeft: "1px solid var(--border)", display: "flex", flexDirection: "column", background: "#050510" }}>
+        <div style={{ borderLeft: "1px solid var(--border)", display: "flex", flexDirection: "column", background: "#050510", minHeight: 0, overflow: "hidden" }}>
           <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
             <span style={{ fontSize: 9, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "1px", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
               {pipeStatus === "running" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", display: "inline-block", animation: "pulse 1.5s infinite" }} />}
@@ -1126,27 +1126,33 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
             </span>
             <button onClick={() => { setLogs([]); fetch("/api/pipeline-events", { method: "DELETE" }).catch(() => {}); }} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 9, fontFamily: "inherit", fontWeight: 700, letterSpacing: "0.5px" }}>CLEAR</button>
           </div>
-          <div ref={logPanelRef} style={{ flex: 1, overflowY: "auto", padding: "6px 0", fontFamily: "'SF Mono','Fira Code',monospace", fontSize: 10.5 }}>
+          <div ref={logPanelRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "6px 0", fontFamily: "'SF Mono','Fira Code',monospace", fontSize: 10.5 }}>
             {logs.length === 0 ? (
               <div style={{ padding: "32px 16px", color: "var(--text-muted)", textAlign: "center", lineHeight: 2 }}>
                 <Terminal size={22} style={{ opacity: 0.15, display: "block", margin: "0 auto 8px" }} />
                 Run pipeline to see live output
               </div>
-            ) : logs.map((entry) => (
-              <div key={entry.id} style={{ padding: "2px 12px 3px", borderLeft: `2px solid ${levelColor(entry.level)}30`, marginBottom: 1 }}>
-                <div style={{ display: "flex", gap: 5, marginBottom: 1 }}>
-                  <span style={{ fontSize: 9, color: "var(--text-muted)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
-                    {new Date(entry.ts).toLocaleTimeString("en", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                  </span>
-                  <span style={{ fontSize: 9, fontWeight: 700, color: "#6366f1", flexShrink: 0, maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {entry.agent}
-                  </span>
+            ) : logs.map((entry, idx) => {
+              const tsDate = entry.ts ? new Date(entry.ts) : null;
+              const tsStr  = tsDate && !isNaN(tsDate.getTime())
+                ? tsDate.toLocaleTimeString("en", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                : "";
+              return (
+                <div key={entry.id ?? `${entry.ts}-${idx}`} style={{ padding: "2px 12px 3px", borderLeft: `2px solid ${levelColor(entry.level ?? "")}30`, marginBottom: 1 }}>
+                  <div style={{ display: "flex", gap: 5, marginBottom: 1 }}>
+                    <span style={{ fontSize: 9, color: "var(--text-muted)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
+                      {tsStr}
+                    </span>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: "#6366f1", flexShrink: 0, maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {entry.agent ?? ""}
+                    </span>
+                  </div>
+                  <div style={{ color: levelColor(entry.level ?? ""), wordBreak: "break-word", lineHeight: 1.55 }}>
+                    {stripSlugPrefix(entry.message)}
+                  </div>
                 </div>
-                <div style={{ color: levelColor(entry.level), wordBreak: "break-word", lineHeight: 1.55 }}>
-                  {stripSlugPrefix(entry.message)}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
@@ -1323,7 +1329,7 @@ function QueueView({ tier }: { tier: Tier }) {
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.6, color: "var(--text)", marginBottom: 4 }}>Content Queue</h1>
           <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
-            {tier === "advanced" ? "Sheet2 — Advanced V2 pipeline (Veo 3.1 Lite)" : "Sheet1 — Basic pipeline (Pexels backgrounds)"}
+            {tier === "advanced" ? "Video Gen — Advanced V2 pipeline (Veo 3.1 Lite)" : "Sheet1 — Basic pipeline (Pexels backgrounds)"}
           </p>
         </div>
         <span style={{ padding: "5px 14px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: tier === "advanced" ? "linear-gradient(135deg,rgba(99,102,241,0.2),rgba(167,139,250,0.2))" : "var(--bg-elevated)", color: tier === "advanced" ? "var(--accent)" : "var(--text-muted)", border: `1px solid ${tier === "advanced" ? "rgba(99,102,241,0.3)" : "var(--border)"}` }}>
@@ -1427,24 +1433,25 @@ function QueueView({ tier }: { tier: Tier }) {
 // ─── Agents View ──────────────────────────────────────────────
 
 const ALL_AGENTS = [
-  { name: "Script Writer",  desc: "Hook + script generation via Claude AI",                          svc: "anthropic", fb: "Template fallback", Icon: Wand2 },
-  { name: "Design Agent",   desc: "Visual theme, mood and color palette selection",                  svc: "anthropic", fb: "Default theme",     Icon: Layers },
-  { name: "Storyboard",     desc: "Shot sequence, narrative arc and visual plan",                    svc: "anthropic", fb: "Default storyboard", Icon: Clapperboard },
-  { name: "Music Director", desc: "Scrapes Pixabay Music — picks track by topic/mood, downloads MP3", svc: "jamendo",  fb: "Skipped",           Icon: Music2 },
-  { name: "Prompt Engine",  desc: "Video scene data & timing via Claude",                            svc: "anthropic", fb: "Template fallback", Icon: Zap },
-  { name: "Branding Agent", desc: "Ottoflow palette, CTAs and hashtag injection",                    svc: "branding",  fb: null,               Icon: Tag },
-  { name: "Pexels Client",  desc: "HD background photos and videos by topic",                        svc: "pexels",    fb: "Static backgrounds", Icon: Image },
-  { name: "Render Agent",   desc: "Remotion CLI → MP4 render",                                       svc: "remotion",  fb: null,               Icon: Video },
-  { name: "FFmpeg Agent",   desc: "Color grade, loudnorm, music mix, TikTok compress",               svc: "ffmpeg",    fb: "Raw render used",  Icon: Film },
-  { name: "Telegram Bot",   desc: "Delivers final video to your Telegram channel",                   svc: "telegram",  fb: null,               Icon: Send },
-  { name: "Sheets Client",  desc: "Google Sheets queue: read → process → write back",                svc: "sheets",    fb: null,               Icon: FileSpreadsheet },
-  { name: "n8n Agent",      desc: "Triggers n8n Cloud workflows via REST API",                       svc: "n8n",       fb: "Skipped",           Icon: Activity },
+  { name: "Gemini Script",   desc: "Gemini 2.0 Flash — script + scene prompts (V2 Advanced)",      svc: "gemini",     fb: "Anthropic fallback", Icon: Wand2,          v2: true  },
+  { name: "ElevenLabs TTS",  desc: "eleven_v3 — text-to-speech voiceover with emotion (V2)",       svc: "elevenlabs", fb: "Skipped",            Icon: Activity,       v2: true  },
+  { name: "Veo 3.1 Lite",    desc: "Google AI text-to-video per scene, 9:16 portrait (V2)",        svc: "gemini",     fb: "Imagen3 fallback",   Icon: Video,          v2: true  },
+  { name: "Script Writer",   desc: "Hook + script generation via Claude AI (Basic)",                svc: "anthropic",  fb: "Template fallback",  Icon: Wand2                    },
+  { name: "Design Agent",    desc: "Visual theme, mood and color palette selection",                svc: "anthropic",  fb: "Default theme",      Icon: Layers                   },
+  { name: "Storyboard",      desc: "Shot sequence, narrative arc and visual plan",                  svc: "anthropic",  fb: "Default storyboard", Icon: Clapperboard             },
+  { name: "Music Director",  desc: "Scrapes Pixabay Music — picks track by topic/mood",            svc: "jamendo",    fb: "Skipped",            Icon: Music2                   },
+  { name: "Pexels Client",   desc: "HD background photos and videos by topic (Basic)",              svc: "pexels",     fb: "Static backgrounds", Icon: Image                    },
+  { name: "Branding Agent",  desc: "Ottoflow palette, CTAs and hashtag injection",                  svc: "branding",   fb: null,                 Icon: Tag                      },
+  { name: "Render Agent",    desc: "Remotion CLI → MP4 render",                                     svc: "remotion",   fb: null,                 Icon: Clapperboard             },
+  { name: "FFmpeg Agent",    desc: "Color grade, loudnorm, music mix, TikTok compress",             svc: "ffmpeg",     fb: "Raw render used",    Icon: Film                     },
+  { name: "Telegram Bot",    desc: "Delivers final video with approval buttons",                    svc: "telegram",   fb: null,                 Icon: Send                     },
+  { name: "Sheets Client",   desc: "Google Sheets queue: read → process → write back",              svc: "sheets",     fb: null,                 Icon: FileSpreadsheet          },
 ];
 
 const SVC_LABELS: Record<string, string> = {
-  anthropic: "Claude AI", jamendo: "Music", pexels: "Pexels",
-  telegram: "Telegram", sheets: "Sheets", n8n: "n8n",
-  ffmpeg: "FFmpeg", remotion: "Remotion", branding: "Branding",
+  gemini: "Gemini AI", elevenlabs: "ElevenLabs", anthropic: "Claude AI",
+  pexels: "Pexels", telegram: "Telegram", sheets: "Sheets",
+  n8n: "n8n", ffmpeg: "FFmpeg", remotion: "Remotion",
 };
 
 function AgentsView() {
@@ -1504,7 +1511,12 @@ function AgentsView() {
                   </span>
                 )}
               </div>
-              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 5, color: "var(--text)" }}>{a.name}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                <span style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>{a.name}</span>
+                {(a as { v2?: boolean }).v2 && (
+                  <span style={{ fontSize: 9, fontWeight: 800, color: "#a78bfa", background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 4, padding: "1px 5px", letterSpacing: "0.5px" }}>V2</span>
+                )}
+              </div>
               <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.65 }}>{a.desc}</div>
             </motion.div>
           );
@@ -1597,7 +1609,7 @@ function ReviewCard({ row }: { row: QueueRow }) {
         <>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 14 }}>
             {data.checks.map((c, i) => (
-              <div key={i} title={`${c.agent} — ${c.detail}`} style={{ padding: "3px 9px", borderRadius: 20, background: c.pass ? "var(--green-light)" : "var(--red-light)", color: c.pass ? "var(--green)" : "var(--red)", fontSize: 10, fontWeight: 700, cursor: "default", display: "flex", alignItems: "center", gap: 4 }}>
+              <div key={`check-${i}-${c.rule}`} title={`${c.agent} — ${c.detail}`} style={{ padding: "3px 9px", borderRadius: 20, background: c.pass ? "var(--green-light)" : "var(--red-light)", color: c.pass ? "var(--green)" : "var(--red)", fontSize: 10, fontWeight: 700, cursor: "default", display: "flex", alignItems: "center", gap: 4 }}>
                 {c.pass ? <CheckCircle2 size={9} /> : <XCircle size={9} />}
                 {c.rule.replace(" present","").replace(" applied","").replace(" fetched","").replace(" set","").trim()}
               </div>
@@ -1606,9 +1618,9 @@ function ReviewCard({ row }: { row: QueueRow }) {
           {data.stillsReady && data.stills.length > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 4, marginBottom: 12 }}>
               {data.stills.map((src, i) => {
-                const label = src.split("scene-")[1]?.replace(".jpg","") ?? i;
+                const label = src.split("scene-")[1]?.replace(".jpg","") ?? String(i);
                 return (
-                  <div key={i} style={{ position: "relative" }}>
+                  <div key={`still-${i}-${src}`} style={{ position: "relative" }}>
                     <div style={{ aspectRatio: "9/16", borderRadius: 5, overflow: "hidden", background: "var(--bg-elevated)", border: "1px solid var(--border)" }}>
                       <img src={src} alt={`Scene ${label}`} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                     </div>
@@ -1712,7 +1724,7 @@ const primaryBtn = (disabled: boolean): React.CSSProperties => ({
   boxShadow: disabled ? "none" : "0 4px 20px rgba(99,102,241,0.4)", transition: "all 0.2s",
 });
 
-function OwnTopicView({ onGenerate }: { onGenerate: () => void }) {
+function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; tier?: Tier }) {
   const [activeTab, setActiveTab] = useState<TopicTab>("single");
 
   // Single tab
@@ -1740,20 +1752,28 @@ function OwnTopicView({ onGenerate }: { onGenerate: () => void }) {
     if (!t) { toast.error("Enter a topic first"); return; }
     setGenerating(true);
     try {
-      const addRes = await fetch("/api/queue/add", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: t, style }),
-      });
-      if (!addRes.ok) throw new Error("Failed to add topic to sheet");
-      const { rowIndex } = await addRes.json();
-      const renderRes = await fetch("/api/pipeline", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rowIndex, template }),
-      });
-      if (!renderRes.ok) throw new Error("Failed to queue render job");
-      toast.success(`Queued: "${t}" — watch progress in Command Center`);
-      setTopic("");
-      onGenerate();
+      if (tier === "advanced") {
+        const res = await fetch("/api/topics", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topics: [t], style, version: "v2", autoQueue: true }),
+        });
+        if (!res.ok) throw new Error("Failed to queue V2 topic");
+        toast.success(`Queued V2: "${t}" — watch progress in Command Center`);
+      } else {
+        const addRes = await fetch("/api/queue/add", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topic: t, style }),
+        });
+        if (!addRes.ok) throw new Error("Failed to add topic to sheet");
+        const { rowIndex } = await addRes.json();
+        const renderRes = await fetch("/api/pipeline", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rowIndex, template }),
+        });
+        if (!renderRes.ok) throw new Error("Failed to queue render job");
+        toast.success(`Queued: "${t}" — watch progress in Command Center`);
+      }
+      setTopic(""); onGenerate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -1768,7 +1788,7 @@ function OwnTopicView({ onGenerate }: { onGenerate: () => void }) {
     try {
       const res = await fetch("/api/topics", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topics: lines, style: batchStyle, voice: batchVoice, autoQueue: true }),
+        body: JSON.stringify({ topics: lines, style: batchStyle, voice: batchVoice, autoQueue: true, version: tier === "advanced" ? "v2" : "v1" }),
       });
       if (!res.ok) throw new Error("Failed to queue topics");
       const data = await res.json();
@@ -1809,7 +1829,7 @@ function OwnTopicView({ onGenerate }: { onGenerate: () => void }) {
     try {
       const res = await fetch("/api/topics", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topics: picks.map(s => s.topic), style: picks[0]?.style || "Educational", autoQueue: true }),
+        body: JSON.stringify({ topics: picks.map(s => s.topic), style: picks[0]?.style || "Educational", autoQueue: true, version: tier === "advanced" ? "v2" : "v1" }),
       });
       if (!res.ok) throw new Error("Failed to queue topics");
       const data = await res.json();
@@ -1875,25 +1895,37 @@ function OwnTopicView({ onGenerate }: { onGenerate: () => void }) {
             </div>
           </div>
 
-          <div className="card" style={{ padding: 20, marginBottom: 20 }}>
-            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 14 }}>Template</label>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-              {OWN_TOPIC_TEMPLATES.map(({ id, label, Icon, desc }) => {
-                const sel = template === id;
-                return (
-                  <motion.button key={id} onClick={() => setTemplate(id)} whileHover={{ y: -2 }} transition={{ duration: 0.12 }}
-                    style={{ background: sel ? "rgba(99,102,241,0.12)" : "var(--bg-elevated)", border: `1px solid ${sel ? "rgba(99,102,241,0.45)" : "var(--border)"}`, borderRadius: 11, padding: "14px 14px 12px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", boxShadow: sel ? "0 0 0 1px rgba(99,102,241,0.2), 0 4px 16px rgba(99,102,241,0.15)" : "none", transition: "border-color 0.15s, background 0.15s" }}>
-                    <div style={{ width: 34, height: 34, borderRadius: 9, marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", background: sel ? "linear-gradient(135deg,#6366f1,#a78bfa)" : "var(--bg)", border: `1px solid ${sel ? "transparent" : "var(--border)"}`, transition: "all 0.15s" }}>
-                      <Icon size={15} color={sel ? "#fff" : "var(--text-muted)"} strokeWidth={sel ? 2.5 : 1.8} />
-                    </div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: sel ? "var(--accent)" : "var(--text)", marginBottom: 4 }}>{label}</div>
-                    <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.55 }}>{desc}</div>
-                    {sel && <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}><CheckCircle2 size={10} color="var(--accent)" /><span style={{ fontSize: 9, fontWeight: 700, color: "var(--accent)", letterSpacing: "0.4px" }}>SELECTED</span></div>}
-                  </motion.button>
-                );
-              })}
+          {tier === "advanced" ? (
+            <div className="card" style={{ padding: 16, marginBottom: 20, display: "flex", alignItems: "center", gap: 12, background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.25)" }}>
+              <div style={{ width: 36, height: 36, borderRadius: 9, background: "linear-gradient(135deg,#6366f1,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Video size={16} color="#fff" strokeWidth={2} />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)" }}>⚡ Advanced Pipeline — Veo 3.1 Lite + ElevenLabs</div>
+                <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>AI-generated video clips. Template is auto-selected (v2-ugc). Script and scene prompts via Gemini.</div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 14 }}>Template</label>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                {OWN_TOPIC_TEMPLATES.map(({ id, label, Icon, desc }) => {
+                  const sel = template === id;
+                  return (
+                    <motion.button key={id} onClick={() => setTemplate(id)} whileHover={{ y: -2 }} transition={{ duration: 0.12 }}
+                      style={{ background: sel ? "rgba(99,102,241,0.12)" : "var(--bg-elevated)", border: `1px solid ${sel ? "rgba(99,102,241,0.45)" : "var(--border)"}`, borderRadius: 11, padding: "14px 14px 12px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", boxShadow: sel ? "0 0 0 1px rgba(99,102,241,0.2), 0 4px 16px rgba(99,102,241,0.15)" : "none", transition: "border-color 0.15s, background 0.15s" }}>
+                      <div style={{ width: 34, height: 34, borderRadius: 9, marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", background: sel ? "linear-gradient(135deg,#6366f1,#a78bfa)" : "var(--bg)", border: `1px solid ${sel ? "transparent" : "var(--border)"}`, transition: "all 0.15s" }}>
+                        <Icon size={15} color={sel ? "#fff" : "var(--text-muted)"} strokeWidth={sel ? 2.5 : 1.8} />
+                      </div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: sel ? "var(--accent)" : "var(--text)", marginBottom: 4 }}>{label}</div>
+                      <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.55 }}>{desc}</div>
+                      {sel && <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}><CheckCircle2 size={10} color="var(--accent)" /><span style={{ fontSize: 9, fontWeight: 700, color: "var(--accent)", letterSpacing: "0.4px" }}>SELECTED</span></div>}
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <button onClick={handleSingle} disabled={generating || !topic.trim()} style={primaryBtn(generating || !topic.trim())}>
             {generating ? <><Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> Adding to queue…</> : <><Play size={14} fill="currentColor" /> Generate Video</>}
@@ -2058,7 +2090,7 @@ export default function App() {
               style={{ flex: 1, display: "flex", flexDirection: "column", height: view === "center" ? "100vh" : undefined }}
             >
               {view === "center"   && <CommandCenterView tier={tier} setTier={setTier} />}
-              {view === "generate" && <OwnTopicView onGenerate={() => setView("center")} />}
+              {view === "generate" && <OwnTopicView onGenerate={() => setView("center")} tier={tier} />}
               {view === "queue"    && <QueueView tier={tier} />}
               {view === "agents"   && <AgentsView />}
               {view === "review"   && <ReviewView />}

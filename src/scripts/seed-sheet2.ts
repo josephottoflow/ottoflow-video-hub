@@ -52,10 +52,10 @@ const TOPICS = [
 ];
 
 (async () => {
-  const sheets = new SheetsClient("Sheet2");
+  const sheets = new SheetsClient("Video Gen");
   await sheets.initializeSheet();
 
-  console.log("Clearing Sheet2...");
+  console.log("Clearing Video Gen...");
   await sheets.clearAllContent();
   console.log("Cleared.");
 
@@ -67,6 +67,6 @@ const TOPICS = [
     console.log(`    Script (${t.script.split(" ").length}w): ${t.script.substring(0, 80)}...`);
   }
 
-  console.log("\nDone — 4 topics with scripts added to Sheet2.");
+  console.log("\nDone — 4 topics with scripts added to Video Gen.");
   process.exit(0);
 })();

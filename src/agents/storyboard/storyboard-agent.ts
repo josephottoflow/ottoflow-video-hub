@@ -1,243 +1,228 @@
 /**
- * STORYBOARD AGENT — Visual shot plan before PromptEngine
- *
- * Applies ai-video-storyboard skill to generate a 6-shot coordinated plan
- * with a Visual Consistency Layer before the PromptEngine builds video data.
- *
- * Output feeds directly into PromptEngine as enriched scene context,
- * ensuring visual coherence across all 6 cinematic scenes.
- *
- * Shot structure (30s TikTok Reel, Hook → Build → Payoff → CTA):
- *   Shot 1: Hook      — stop-the-scroll visual, ECU or bold graphic
- *   Shot 2: Problem   — relatable pain point or context
- *   Shot 3: Hero      — product / solution reveal
- *   Shot 4: Features  — benefit carousel, fast cuts
- *   Shot 5: Proof     — social proof, lifestyle shot
- *   Shot 6: CTA       — clear call to action
+ * STORYBOARD AGENT — Gemini-powered creative director
+ * Generates a complete dynamic JSON storyboard per render.
+ * Every call produces different scene count, pacing, visual style, and narrative arc.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
-import type { ContentRow } from "../sheets/client";
-import type { DesignSpec, ThemePreset, Mood } from "../design/design-agent";
+import { GoogleGenAI } from "@google/genai";
 
-// ─── Types ───────────────────────────────────────────────────
+export type VisualStyle  = "dark-cinematic" | "bright-minimal" | "neon-tech" | "warm-story" | "high-contrast";
+export type CaptionStyle = "impact" | "word-by-word" | "slide-up" | "pulse";
+export type MusicMood    = "tense" | "uplifting" | "mysterious" | "energetic" | "calm";
+export type ZoomDir      = "in" | "out" | "pan";
+export type SceneBeat    = "hook" | "reveal" | "insight" | "proof" | "cta";
 
-export type ShotPurpose = "hook" | "problem" | "hero" | "features" | "proof" | "cta";
-export type CameraMove  = "locked" | "slow-dolly-in" | "slow-dolly-out" | "tracking" | "handheld" | "crane-up" | "pan";
-export type ShotType    = "ECU" | "CU" | "MS" | "WS" | "OTS" | "POV" | "overhead";
-export type FilmLook    = "clean-digital" | "cinematic-anamorphic" | "neon-glow" | "high-contrast" | "natural-warm";
-
-export interface VisualTheme {
-  palette:     string[];     // 3-5 hex values
-  lighting:    string;       // e.g. "motivated neon rim light"
-  lens:        string;       // e.g. "shallow DOF, 35mm equivalent"
-  filmLook:    FilmLook;
-  motion:      string;       // e.g. "slow dolly with subtle handheld"
-}
-
-export interface StoryboardShot {
-  index:       number;       // 1-6
-  purpose:     ShotPurpose;
-  durationSec: number;
-  shotType:    ShotType;
-  cameraMove:  CameraMove;
-  lighting:    string;
-  subject:     string;
-  action:      string;
-  textOverlay: string;       // on-screen text for this scene
-  audioNote:   string;       // music / VO direction
-  pexelsQuery: string;       // best search term for Pexels background
+export interface StoryboardScene {
+  id:           string;
+  beat:         SceneBeat;
+  seconds:      number;
+  frames:       number;         // seconds * 30
+  narration:    string;
+  visualPrompt: string;
+  caption:      string;
+  keyWord:      string;
+  zoomDir:      ZoomDir;
+  captionStyle: CaptionStyle;
 }
 
 export interface Storyboard {
-  topic:        string;
-  style:        string;
-  totalSec:     number;
-  shotCount:    number;
-  visualTheme:  VisualTheme;
-  shots:        StoryboardShot[];
-  narrativeArc: string;      // one-line summary of the story arc
+  topic:       string;
+  visualStyle: VisualStyle;
+  musicMood:   MusicMood;
+  totalFrames: number;
+  fullScript:  string;
+  scenes:      StoryboardScene[];
 }
 
-// ─── Storyboard Agent ────────────────────────────────────────
+const VARIANT_GUIDE: Record<string, string> = {
+  "problem-first": `Scene 1 (hook, 3-4s): Shocking problem or pain point
+Scene 2 (reveal, 4-6s): Why the problem is worse than they think
+Scene 3 (insight, 5-7s): Core insight or turning-point knowledge
+Scene 4 (proof, 3-5s): Specific stat, example, or proof point
+Scene 5 (cta, 2-3s): Strong call to action`,
+
+  "stat-first": `Scene 1 (hook, 3-4s): Shocking statistic or number
+Scene 2 (insight, 5-7s): What that number means and why it matters
+Scene 3 (proof, 4-6s): Context, trend, or a second data point
+Scene 4 (cta, 2-3s): What to do with this information`,
+
+  "story-arc": `Scene 1 (hook, 3-4s): "I used to struggle with this..." — personal, relatable
+Scene 2 (reveal, 4-6s): "Then I discovered the turning point..."
+Scene 3 (insight, 5-7s): "Here is what actually changed..." — the lesson
+Scene 4 (proof, 3-5s): Show or state the tangible result
+Scene 5 (cta, 2-3s): Invite them to the same transformation`,
+
+  "myth-bust": `Scene 1 (hook, 3-4s): State the popular belief everyone holds
+Scene 2 (reveal, 4-6s): Deliver the reality check: "But the truth is..."
+Scene 3 (proof, 4-6s): Back it up with stats, examples, real evidence
+Scene 4 (insight, 4-5s): What actually works instead
+Scene 5 (cta, 2-3s): Follow for more myth-busting`,
+};
+
+const HOOK_GUIDE: Record<string, string> = {
+  "question":       "Open with a provocative question that speaks to the viewer's pain or desire",
+  "bold-statement": "Open with a bold, contrarian, or unexpected claim — no hedging",
+  "conflict":       "Open by naming a contradiction or paradox the viewer will recognize",
+  "promise":        "Open with a clear, specific promise of transformation or result",
+  "shock":          "Open with something surprising, alarming, or counterintuitive",
+  "story":          "Open mid-story — as if the viewer just walked into something happening",
+};
 
 export class StoryboardAgent {
-  private client: Anthropic | null;
+  private ai: GoogleGenAI | null;
 
   constructor() {
-    this.client = process.env.ANTHROPIC_API_KEY
-      ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-      : null;
+    const apiKey = process.env.GOOGLE_API_KEY;
+    this.ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
   }
 
-  /**
-   * Generate a 6-shot storyboard for a content row + design spec.
-   * Falls back to a template-based storyboard when no API key is set.
-   */
-  async generate(row: ContentRow, design: DesignSpec): Promise<Storyboard> {
-    if (!this.client) return this.fallbackStoryboard(row, design);
+  static isAvailable(): boolean {
+    return !!process.env.GOOGLE_API_KEY;
+  }
 
-    const hook  = row.hookA || row.hookB || row.hookC || row.topic;
-    const filmLook = this.themeToFilmLook(design.theme);
+  async generate(
+    topic:         string,
+    style:         string,
+    renderVariant: string = "problem-first",
+    hookStyle:     string = "shock"
+  ): Promise<Storyboard> {
+    if (!this.ai) {
+      console.warn("[storyboard] No GOOGLE_API_KEY — using fallback storyboard");
+      return this.fallback(topic, renderVariant);
+    }
 
-    const prompt = `You are a cinematic TikTok creative director. Generate a 6-shot storyboard for a 28-second vertical video (1080x1920, 30fps).
+    const variantGuide = VARIANT_GUIDE[renderVariant] ?? VARIANT_GUIDE["problem-first"];
+    const hookGuide    = HOOK_GUIDE[hookStyle]        ?? HOOK_GUIDE["shock"];
 
-TOPIC: ${row.topic}
-STYLE: ${row.style}
-HOOK: ${hook}
-SCRIPT: ${row.script ? row.script.slice(0, 400) : "(generate from topic)"}
-VISUAL THEME: ${design.theme} theme, ${design.mood} mood
-PRIMARY COLOR: ${design.brandColors.primary}
-ACCENT COLOR: ${design.brandColors.accent}
+    const prompt = `You are a viral TikTok creative director. Generate a complete video storyboard JSON.
 
-Shot structure (6 shots = 28s):
-- Shot 1 HOOK (4s): Stop the scroll — bold visual, ECU or graphic
-- Shot 2 PROBLEM (5s): Relatable context or pain point
-- Shot 3 HERO (5s): Core insight or solution reveal
-- Shot 4 FEATURES (5s): 3 key benefits, fast visual
-- Shot 5 PROOF (4s): Social proof or lifestyle moment
-- Shot 6 CTA (5s): Clear call to action
+TOPIC: "${topic}"
+CONTENT STYLE: "${style}"
+NARRATIVE VARIANT: ${renderVariant}
+HOOK STYLE: ${hookStyle} — ${hookGuide}
+
+NARRATIVE ARC (follow this scene structure):
+${variantGuide}
+
+VISUAL STYLES (pick ONE that fits the topic emotional tone):
+- "dark-cinematic": dramatic tension, contrast, urgency — myths, problems, warnings
+- "bright-minimal": clean, optimistic — how-tos, growth, transformation
+- "neon-tech": deep dark with electric accents — AI, tech, data, automation
+- "warm-story": golden intimate feel — personal stories, human moments
+- "high-contrast": bold black/white aesthetic — big claims, statistics, shock
+
+CAPTION STYLES (vary across scenes — never repeat same style twice in a row):
+- "impact": 2-3 power words, one highlighted (hook and cta)
+- "word-by-word": words appear sequentially (revelations)
+- "slide-up": phrase slides up from bottom (mid-video insights)
+- "pulse": words scale-pulse in (proof points)
+
+MUSIC MOODS: tense | uplifting | mysterious | energetic | calm
+
+RULES:
+1. Scene count: match variant guide (3-5 scenes)
+2. Narration per scene: 6-12 words ONLY. Punchy. No filler.
+3. Total narration: 30-45 words across ALL scenes
+4. caption: 2-3 words ONLY. Power words. No articles.
+5. keyWord: ONE word from caption (most impactful, lowercase)
+6. frames = seconds * 30 (integer)
+7. visualPrompt: cinematic, specific, NO text overlays, 9:16 portrait, slow motion, photorealistic
+8. First scene beat = "hook". Last scene beat = "cta".
+9. zoomDir: vary — never same direction twice in a row
 
 Return ONLY valid JSON:
 {
-  "visualTheme": {
-    "palette": ["${design.brandColors.primary}", "${design.brandColors.secondary}", "${design.brandColors.accent}", "#0a0a0a", "#ffffff"],
-    "lighting": "describe the lighting style",
-    "lens": "describe the lens/DOF character",
-    "filmLook": "${filmLook}",
-    "motion": "describe the motion language"
-  },
-  "narrativeArc": "one sentence describing the story arc",
-  "shots": [
-    {
-      "index": 1,
-      "purpose": "hook",
-      "durationSec": 4,
-      "shotType": "ECU|CU|MS|WS|OTS|POV|overhead",
-      "cameraMove": "locked|slow-dolly-in|slow-dolly-out|tracking|handheld|crane-up|pan",
-      "lighting": "specific lighting for this shot",
-      "subject": "concrete description of what is in frame",
-      "action": "what is happening in the shot",
-      "textOverlay": "on-screen text for this scene (hook line, benefit, CTA)",
-      "audioNote": "music beat or VO line direction",
-      "pexelsQuery": "3-5 word Pexels video search term — MUST be topic-specific and visually concrete"
-    }
-    // ... 6 total
+  "visualStyle": "dark-cinematic",
+  "musicMood": "tense",
+  "scenes": [
+    { "id": "s1", "beat": "hook", "seconds": 4, "frames": 120, "narration": "...", "visualPrompt": "...", "caption": "EXAMPLE HOOK", "keyWord": "hook", "zoomDir": "in", "captionStyle": "impact" }
   ]
-}
-
-Rules:
-- Every shot must reference the palette and lighting style (visual consistency)
-- Text overlays must be short (max 8 words)
-- pexelsQuery MUST be specific to the topic — NOT generic words like "background", "abstract", "concept", "dark background"
-- pexelsQuery examples for "OKRs goal setting": "executive strategy whiteboard night", "team alignment meeting dark", "goal tracker notebook closeup", "performance review laptop office"
-- pexelsQuery examples for "5 Whys method": "engineer analyzing factory problem", "root cause diagram whiteboard", "manufacturing inspection closeup", "problem solving team huddle"
-- Think: what does an expert in this topic physically DO? What environment are they in? What tools do they use?
-- Make subject descriptions specific — describe exactly what is in frame`;
+}`;
 
     try {
-      const message = await this.client.messages.create({
-        model:      "claude-haiku-4-5-20251001",
-        max_tokens: 2048,
-        messages:   [{ role: "user", content: prompt }],
+      const response = await this.ai.models.generateContent({
+        model:    "gemini-2.0-flash",
+        contents: prompt,
       });
 
-      const text = message.content[0];
-      if (text.type !== "text") throw new Error("Unexpected Claude response");
+      const text = response.text ?? "";
+      const json = text.match(/\{[\s\S]*\}/)?.[0];
+      if (!json) throw new Error("No JSON in Gemini response");
 
-      const raw    = text.text.trim().replace(/^```json?\n?/, "").replace(/\n?```$/, "");
-      const parsed = JSON.parse(raw);
+      const raw = JSON.parse(json) as {
+        visualStyle?: string;
+        musicMood?:   string;
+        scenes?:      Partial<StoryboardScene>[];
+      };
+
+      if (!raw.scenes?.length) throw new Error("Storyboard has no scenes");
+
+      const scenes: StoryboardScene[] = raw.scenes.map((s, i) => {
+        const secs = Math.max(3, Math.min(12, Number(s.seconds) || 5));
+        const VALID_ZOOM:    ZoomDir[]      = ["in", "out", "pan"];
+        const VALID_CAPTION: CaptionStyle[] = ["impact", "word-by-word", "slide-up", "pulse"];
+        return {
+          id:           s.id           ?? `s${i + 1}`,
+          beat:         (s.beat        ?? (i === 0 ? "hook" : i === raw.scenes!.length - 1 ? "cta" : "insight")) as SceneBeat,
+          seconds:      secs,
+          frames:       secs * 30,
+          narration:    s.narration    ?? "",
+          visualPrompt: s.visualPrompt ?? `${topic}, cinematic 9:16, slow motion, dramatic lighting`,
+          caption:      (s.caption     ?? topic.split(" ").slice(0, 3).join(" ")).toUpperCase(),
+          keyWord:      ((s.keyWord    ?? (s.caption ?? "now").split(" ")[0])).toLowerCase(),
+          zoomDir:      VALID_ZOOM.includes(s.zoomDir as ZoomDir) ? (s.zoomDir as ZoomDir) : VALID_ZOOM[i % 3],
+          captionStyle: VALID_CAPTION.includes(s.captionStyle as CaptionStyle) ? (s.captionStyle as CaptionStyle) : "impact",
+        };
+      });
+
+      const fullScript  = scenes.map(s => s.narration).filter(Boolean).join(" ");
+      const totalFrames = scenes.reduce((sum, s) => sum + s.frames, 0);
+
+      console.log(`[storyboard] ${scenes.length} scenes, ${totalFrames}f (${(totalFrames / 30).toFixed(1)}s), style=${raw.visualStyle}`);
+      console.log(`[storyboard] Script (${fullScript.split(" ").length}w): ${fullScript.slice(0, 80)}...`);
 
       return {
-        topic:       row.topic,
-        style:       row.style,
-        totalSec:    28,
-        shotCount:   6,
-        visualTheme: parsed.visualTheme || this.fallbackTheme(design),
-        shots:       (parsed.shots || []).slice(0, 6),
-        narrativeArc: parsed.narrativeArc || `${row.topic} — Hook to CTA`,
+        topic,
+        visualStyle: (raw.visualStyle ?? "dark-cinematic") as VisualStyle,
+        musicMood:   (raw.musicMood   ?? "tense") as MusicMood,
+        totalFrames,
+        fullScript,
+        scenes,
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("credit") || msg.includes("quota") || msg.includes("billing")) {
-        console.warn(`[StoryboardAgent] API credits unavailable — using template storyboard`);
-        return this.fallbackStoryboard(row, design);
-      }
-      throw err;
+      console.error("[storyboard] Gemini failed:", err instanceof Error ? err.message : err);
+      return this.fallback(topic, renderVariant);
     }
   }
 
-  /**
-   * Extract Pexels queries from a storyboard for background fetching.
-   * Returns deduplicated list, most important shots first.
-   */
-  getPexelsQueries(storyboard: Storyboard): string[] {
-    const queries = storyboard.shots
-      .map((s) => s.pexelsQuery)
-      .filter(Boolean);
-    return [...new Set(queries)];
-  }
+  private fallback(topic: string, renderVariant: string): Storyboard {
+    const t = topic.slice(0, 40);
 
-  /**
-   * Format storyboard into a context string for the PromptEngine.
-   */
-  toPromptContext(storyboard: Storyboard): string {
-    const theme = storyboard.visualTheme;
-    const lines = [
-      `VISUAL THEME: ${theme.filmLook} | ${theme.lighting} | ${theme.lens} | motion: ${theme.motion}`,
-      `PALETTE: ${theme.palette.join(", ")}`,
-      `STORY ARC: ${storyboard.narrativeArc}`,
-      "",
-      "SHOT PLAN:",
-      ...storyboard.shots.map((s) =>
-        `  Shot ${s.index} [${s.purpose.toUpperCase()}] ${s.durationSec}s — ${s.shotType}, ${s.cameraMove} | "${s.textOverlay}" | VO: ${s.audioNote}`
-      ),
+    const scenesByVariant: Record<string, StoryboardScene[]> = {
+      "myth-bust": [
+        { id: "s1", beat: "hook",    seconds: 4, frames: 120, narration: `Everyone thinks they understand ${t}.`,                              visualPrompt: `Confident people making assumptions, dramatic backlighting, ${t}, 9:16 portrait, slow zoom`,                 caption: "EVERYONE THINKS",  keyWord: "thinks",  zoomDir: "in",  captionStyle: "impact"       },
+        { id: "s2", beat: "reveal",  seconds: 5, frames: 150, narration: "But 73% of practitioners get the fundamentals completely wrong.",     visualPrompt: "Shocked reaction, red warning indicators, dark tense office, slow zoom, 9:16",                              caption: "73% WRONG",        keyWord: "wrong",   zoomDir: "pan", captionStyle: "word-by-word" },
+        { id: "s3", beat: "insight", seconds: 7, frames: 210, narration: "The real approach focuses on systems, not symptoms. Always has.",     visualPrompt: "Clean structured diagram, systematic workflow, professional environment, 9:16 cinematic",                   caption: "SYSTEMS WIN",      keyWord: "systems", zoomDir: "pan", captionStyle: "slide-up"     },
+        { id: "s4", beat: "cta",     seconds: 3, frames: 90,  narration: "Follow for the framework that actually works.",                       visualPrompt: "Professional looking directly at camera, confident minimal background, natural light, 9:16",                 caption: "FOLLOW NOW",       keyWord: "follow",  zoomDir: "in",  captionStyle: "pulse"        },
+      ],
+      "stat-first": [
+        { id: "s1", beat: "hook",    seconds: 4, frames: 120, narration: `Only 14% of professionals truly master ${t}.`,                        visualPrompt: "Bold statistic visualization, dark dramatic background, spotlight on number, 9:16 slow zoom",                 caption: "ONLY 14%",         keyWord: "14%",     zoomDir: "in",  captionStyle: "impact"       },
+        { id: "s2", beat: "insight", seconds: 7, frames: 210, narration: "Those who do earn 3x more and work half as hard. That is the gap.",    visualPrompt: "Two contrasting environments, success vs struggle, dramatic split lighting, 9:16 cinematic",                  caption: "3X MORE",          keyWord: "3x",      zoomDir: "pan", captionStyle: "slide-up"     },
+        { id: "s3", beat: "proof",   seconds: 4, frames: 120, narration: "The data does not lie. This works across every industry.",             visualPrompt: "Upward trending graphs, green success metrics, clean data visualization, 9:16 slow zoom out",                caption: "DATA PROVES",      keyWord: "data",    zoomDir: "out", captionStyle: "word-by-word" },
+        { id: "s4", beat: "cta",     seconds: 3, frames: 90,  narration: "Follow to close that gap starting today.",                            visualPrompt: "Upward motion, sunrise, bright optimistic energy, 9:16 portrait",                                           caption: "CLOSE THE GAP",   keyWord: "gap",     zoomDir: "in",  captionStyle: "pulse"        },
+      ],
+    };
+
+    const scenes = scenesByVariant[renderVariant] ?? [
+      { id: "s1", beat: "hook" as SceneBeat,    seconds: 4, frames: 120, narration: `Most people get ${t} completely wrong.`,                  visualPrompt: `Dramatic close-up, tension and urgency, ${t} environment, slow cinematic push-in, 9:16`,                   caption: "MOST FAIL THIS",   keyWord: "fail",    zoomDir: "in"  as ZoomDir, captionStyle: "impact"       as CaptionStyle },
+      { id: "s2", beat: "reveal" as SceneBeat,  seconds: 5, frames: 150, narration: "Here is the painful truth nobody wants to admit.",         visualPrompt: "Reality check moment, sharp contrast lighting, raw honest environment, 9:16 portrait",                      caption: "THE TRUTH",        keyWord: "truth",   zoomDir: "pan" as ZoomDir, captionStyle: "word-by-word" as CaptionStyle },
+      { id: "s3", beat: "insight" as SceneBeat, seconds: 7, frames: 210, narration: "The real secret is simpler than any expert admits.",       visualPrompt: "Clarity and breakthrough moment, light breaking through, modern professional, 9:16 slow pan",               caption: "ONE THING",        keyWord: "one",     zoomDir: "pan" as ZoomDir, captionStyle: "slide-up"     as CaptionStyle },
+      { id: "s4", beat: "cta" as SceneBeat,     seconds: 3, frames: 90,  narration: "Follow for more frameworks that actually deliver.",         visualPrompt: "Confident direct-to-camera moment, clean backdrop, forward momentum, 9:16 portrait",                       caption: "FOLLOW NOW",       keyWord: "follow",  zoomDir: "in"  as ZoomDir, captionStyle: "pulse"        as CaptionStyle },
     ];
-    return lines.join("\n");
-  }
 
-  // ─── Private Helpers ──────────────────────────────────────
+    const fullScript  = scenes.map(s => s.narration).join(" ");
+    const totalFrames = scenes.reduce((sum, s) => sum + s.frames, 0);
 
-  private themeToFilmLook(theme: ThemePreset): FilmLook {
-    const map: Record<ThemePreset, FilmLook> = {
-      neon:    "neon-glow",
-      bold:    "high-contrast",
-      tech:    "clean-digital",
-      luxury:  "cinematic-anamorphic",
-      outdoor: "natural-warm",
-      minimal: "clean-digital",
-    };
-    return map[theme] || "clean-digital";
-  }
-
-  private fallbackTheme(design: DesignSpec): VisualTheme {
-    return {
-      palette:  [design.brandColors.primary, design.brandColors.secondary, design.brandColors.accent, "#0a0a0a", "#ffffff"],
-      lighting: "motivated rim light with soft fill",
-      lens:     "shallow DOF, 35mm equivalent",
-      filmLook: this.themeToFilmLook(design.theme),
-      motion:   "slow dolly with subtle handheld energy",
-    };
-  }
-
-  private fallbackStoryboard(row: ContentRow, design: DesignSpec): Storyboard {
-    const kw = row.topic.toLowerCase().split(" ").slice(0, 2).join(" ");
-    const shots: StoryboardShot[] = [
-      { index: 1, purpose: "hook",     durationSec: 4, shotType: "ECU", cameraMove: "slow-dolly-in",  lighting: "high-key rim light",  subject: "bold graphic with hook text",      action: "text animates in fast",    textOverlay: (row.hookA || row.topic).slice(0, 50), audioNote: "punchy beat drop",          pexelsQuery: `${kw} dramatic closeup dark` },
-      { index: 2, purpose: "problem",  durationSec: 5, shotType: "MS",  cameraMove: "handheld",        lighting: "motivated natural",    subject: "person looking concerned at data", action: "slow head shake",          textOverlay: "The hidden problem",                  audioNote: "tense underscore",          pexelsQuery: `${kw} frustrated person office` },
-      { index: 3, purpose: "hero",     durationSec: 5, shotType: "CU",  cameraMove: "slow-dolly-in",  lighting: "clean backlight",      subject: "insight or core concept visual",   action: "reveal with light flash",  textOverlay: row.topic.slice(0, 40),                audioNote: "triumphant sting",          pexelsQuery: `${kw} insight strategy night` },
-      { index: 4, purpose: "features", durationSec: 5, shotType: "MS",  cameraMove: "tracking",        lighting: "motivated fill",       subject: "three key benefit callouts",       action: "fast cuts between points", textOverlay: "3 things you need to know",           audioNote: "rhythmic beat",             pexelsQuery: `${kw} professional team meeting` },
-      { index: 5, purpose: "proof",    durationSec: 4, shotType: "WS",  cameraMove: "crane-up",        lighting: "golden hour warm",     subject: "success metric or social proof",   action: "number counter animation", textOverlay: "Results that matter",                 audioNote: "inspirational swell",       pexelsQuery: `${kw} success achievement growth` },
-      { index: 6, purpose: "cta",      durationSec: 5, shotType: "MS",  cameraMove: "locked",          lighting: "motivated rim light",  subject: "follow button and channel brand",  action: "call to action pulse",     textOverlay: "Follow for more",                     audioNote: "outro beat",                pexelsQuery: `${kw} action motivation confident` },
-    ];
-    return {
-      topic:       row.topic,
-      style:       row.style,
-      totalSec:    28,
-      shotCount:   6,
-      visualTheme: this.fallbackTheme(design),
-      shots,
-      narrativeArc: `${row.topic} — from problem awareness to actionable insight`,
-    };
+    return { topic, visualStyle: "dark-cinematic", musicMood: "tense", totalFrames, fullScript, scenes };
   }
 }

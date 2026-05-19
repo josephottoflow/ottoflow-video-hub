@@ -1,20 +1,58 @@
-// v2 — V2 UGC video: 3-scene Veo-animated (or AI-image fallback) cinematic, 450f = 15s
+// v2 — V2 UGC video: dynamic storyboard renderer (3-5 scenes) + legacy 3-scene fallback
 
 import React from "react";
 import { AbsoluteFill, Audio, Sequence } from "remotion";
 import { V2Scene } from "./V2Scene";
-import { V2_SCENES } from "./types";
+import { V2_SCENES, VISUAL_STYLE_TOKENS } from "./types";
 import { resolveImage } from "../engine/resolveImage";
 import type { V2UGCProps } from "./types";
 
 export const V2UGCVideo: React.FC<V2UGCProps> = ({ data }) => {
   if (!data) return <AbsoluteFill style={{ backgroundColor: "#000" }} />;
 
-  const { scenes, voiceoverUrl } = data;
+  const { voiceoverUrl } = data;
+
+  // ── Dynamic storyboard path (new) ────────────────────────────
+  if (data.storyboard?.scenes?.length) {
+    const { storyboard } = data;
+    const tokens = VISUAL_STYLE_TOKENS[storyboard.visualStyle] ?? VISUAL_STYLE_TOKENS["dark-cinematic"];
+
+    let frameOffset = 0;
+    return (
+      <AbsoluteFill style={{ backgroundColor: "#000" }}>
+        {storyboard.scenes.map((scene) => {
+          const from = frameOffset;
+          frameOffset += scene.frames;
+          return (
+            <Sequence key={scene.id} from={from} durationInFrames={scene.frames}>
+              <V2Scene
+                imagePath={scene.imagePath     ?? ""}
+                videoClipPath={scene.videoClipPath}
+                caption={scene.caption}
+                keyWord={scene.keyWord}
+                durationFrames={scene.frames}
+                zoomDirection={scene.zoomDir}
+                captionStyle={scene.captionStyle}
+                highlightColor={tokens.highlightColor}
+                overlayColor={tokens.overlayColor}
+                overlayOpacity={tokens.overlayAlpha}
+              />
+            </Sequence>
+          );
+        })}
+        {voiceoverUrl && <Audio src={resolveImage(voiceoverUrl)} volume={1} />}
+      </AbsoluteFill>
+    );
+  }
+
+  // ── Legacy 3-scene path (backward compat) ────────────────────
+  const scenes = data.scenes;
+  if (!scenes) return <AbsoluteFill style={{ backgroundColor: "#000" }} />;
+
+  const legacyTokens = VISUAL_STYLE_TOKENS["dark-cinematic"];
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
-      {/* Hook — 5s (0-149f). Sequence makes frame=0 at the scene start */}
       <Sequence from={V2_SCENES.hook.start} durationInFrames={V2_SCENES.hook.frames}>
         <V2Scene
           imagePath={scenes.hook.imagePath}
@@ -23,10 +61,12 @@ export const V2UGCVideo: React.FC<V2UGCProps> = ({ data }) => {
           keyWord={scenes.hook.keyWord}
           durationFrames={V2_SCENES.hook.frames}
           zoomDirection="in"
+          captionStyle="impact"
+          highlightColor={legacyTokens.highlightColor}
+          overlayColor={legacyTokens.overlayColor}
+          overlayOpacity={legacyTokens.overlayAlpha}
         />
       </Sequence>
-
-      {/* Insight — 11s (150-479f) */}
       <Sequence from={V2_SCENES.insight.start} durationInFrames={V2_SCENES.insight.frames}>
         <V2Scene
           imagePath={scenes.insight.imagePath}
@@ -35,11 +75,12 @@ export const V2UGCVideo: React.FC<V2UGCProps> = ({ data }) => {
           keyWord={scenes.insight.keyWord}
           durationFrames={V2_SCENES.insight.frames}
           zoomDirection="pan"
+          captionStyle="impact"
+          highlightColor={legacyTokens.highlightColor}
+          overlayColor={legacyTokens.overlayColor}
           overlayOpacity={0.5}
         />
       </Sequence>
-
-      {/* CTA — 4s (480-599f) */}
       <Sequence from={V2_SCENES.cta.start} durationInFrames={V2_SCENES.cta.frames}>
         <V2Scene
           imagePath={scenes.cta.imagePath}
@@ -48,14 +89,13 @@ export const V2UGCVideo: React.FC<V2UGCProps> = ({ data }) => {
           keyWord={scenes.cta.keyWord}
           durationFrames={V2_SCENES.cta.frames}
           zoomDirection="out"
+          captionStyle="impact"
+          highlightColor={legacyTokens.highlightColor}
+          overlayColor={legacyTokens.overlayColor}
           overlayOpacity={0.55}
         />
       </Sequence>
-
-      {/* Voiceover — plays from frame 0 across entire video */}
-      {voiceoverUrl && (
-        <Audio src={resolveImage(voiceoverUrl)} volume={1} />
-      )}
+      {voiceoverUrl && <Audio src={resolveImage(voiceoverUrl)} volume={1} />}
     </AbsoluteFill>
   );
 };

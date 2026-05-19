@@ -248,7 +248,7 @@ export const RemotionRoot: React.FC = () => {
         defaultProps={{ data: null }}
       />
 
-      {/* V2 UGC — AI-generated scenes, bold captions, Telegram approval gate */}
+      {/* V2 UGC — Dynamic storyboard engine (3-5 scenes, variable duration) */}
       <Composition
         id="v2-ugc"
         component={V2UGCVideo}
@@ -261,11 +261,19 @@ export const RemotionRoot: React.FC = () => {
           data: {
             topic: "V2 Preview",
             scenes: {
-              hook:    { imagePath: "", caption: "Stop scrolling now",  keyWord: "STOP"  },
-              insight: { imagePath: "", caption: "Here is the truth",   keyWord: "TRUTH" },
-              cta:     { imagePath: "", caption: "Follow for more",     keyWord: "FOLLOW"},
+              hook:    { imagePath: "", caption: "Stop Scrolling Now",  keyWord: "STOP"  },
+              insight: { imagePath: "", caption: "Here Is The Truth",   keyWord: "TRUTH" },
+              cta:     { imagePath: "", caption: "Follow For More",     keyWord: "FOLLOW"},
             },
           },
+        }}
+        calculateMetadata={({ props }) => {
+          // Use storyboard totalFrames when present — enables dynamic video length
+          const storyboard = (props as { data?: { storyboard?: { totalFrames?: number } } })?.data?.storyboard;
+          if (storyboard?.totalFrames && storyboard.totalFrames > 0) {
+            return { durationInFrames: storyboard.totalFrames };
+          }
+          return { durationInFrames: V2_TOTAL };
         }}
       />
 

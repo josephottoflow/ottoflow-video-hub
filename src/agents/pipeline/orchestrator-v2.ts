@@ -1,18 +1,17 @@
 /**
- * PIPELINE ORCHESTRATOR V2 — 20s short-form video factory (Advanced tier)
+ * PIPELINE ORCHESTRATOR V2 — Dynamic AI Storyboard Video Factory (Advanced tier)
  *
  * Flow:
- *  1. Fetch row from Sheet2
- *  2. Generate/sanitize script (ScriptWriter — ~32 words, 12s spoken)
- *  3. ElevenLabs voiceover → temp/{slug}/voiceover.mp3
- *  4. ImagePromptAgent → 3 scene visual prompts + 3-word captions (Claude Haiku)
- *  5. VeoAgent → Google Veo 2 text-to-video clips (official API, primary)
- *     └─ Imagen3Agent → static portrait images (fallback)
- *  6. MusicAgent → Pixabay background track
- *  7. RenderAgent → v2-ugc Remotion (20s, 600f, clips loop via <Video loop>)
- *  8. FFmpegAgent → mix voiceover + music
- *  9. Telegram → [✅ Approve] [❌ Reject] [🔄 Retry]
- * 10. On approve → Postgres done + Sheet2 Done
+ *  1. Fetch row from "Video Gen" sheet
+ *  2. StoryboardAgent (Gemini) → full JSON storyboard (3-5 scenes, dynamic pacing)
+ *  3. ElevenLabs → voiceover from storyboard.fullScript
+ *  4. VeoAgent → one clip per storyboard scene from scene.visualPrompt
+ *     └─ Imagen3Agent → static image fallback per scene
+ *  5. MusicAgent → Pixabay track (mood from storyboard.musicMood)
+ *  6. RenderAgent → v2-ugc Remotion with storyboard data (dynamic duration)
+ *  7. FFmpegAgent → post-process grade + audio mix
+ *  8. Telegram → [✅ Approve] [❌ Reject] [🔄 Retry]
+ *  9. On approve → Postgres done + Video Gen Done
  */
 
 import * as path from "path";
@@ -22,14 +21,15 @@ import { RenderAgent }         from "../render/render-agent";
 import { TelegramApprovalBot } from "../approval/telegram-bot";
 import { SeoGenerator }        from "../seo/seo-generator";
 import { ScriptWriterAgent, sanitizeScript } from "../scriptwriter/scriptwriter-agent";
+import type { HookStyle, RenderVariant } from "../scriptwriter/scriptwriter-agent";
+import { StoryboardAgent }     from "../storyboard/storyboard-agent";
+import type { Storyboard }    from "../storyboard/storyboard-agent";
 import { FFmpegAgent }         from "../ffmpeg/ffmpeg-agent";
 import { MusicAgent }          from "../music/music-agent";
 import { VoiceoverAgent }      from "../voiceover/voiceover-agent";
-import { ImagePromptAgent }    from "../image-prompt/image-prompt-agent";
 import { Imagen3Agent }        from "../imagen/imagen-agent";
 import { VeoAgent }            from "../veo/veo-agent";
 import { LipsyncAgent }        from "../lipsync/lipsync-agent";
-import { PexelsClient }        from "../pexels/pexels-client";
 import { getConfig }           from "../config/config";
 import { slugify }             from "../../lib/slug-utils";
 import { setStatus, emitLog }  from "../../lib/pipeline-store";
@@ -39,7 +39,12 @@ import type { PipelineResult } from "./orchestrator";
 import type { V2UGCData }      from "../../remotion/v2-ugc/types";
 import type { DesignSpec }     from "../design/design-agent";
 
-const SHEET_NAME = "Sheet2";
+// Veo can only generate 4-8s clips; clamp scene duration to valid range
+function clampVeoDuration(seconds: number): number {
+  return Math.max(4, Math.min(8, seconds));
+}
+
+const SHEET_NAME = "Video Gen";
 
 // Generates a ~32-word script from a topic without any AI API.
 // Used when ScriptWriter fails (no ANTHROPIC_API_KEY) and no script is in the sheet.
@@ -55,35 +60,46 @@ export class PipelineOrchestratorV2 {
   private approvalBot  = new TelegramApprovalBot();
   private seoGen       = new SeoGenerator();
   private scriptWriter = new ScriptWriterAgent();
+  private storyboard   = new StoryboardAgent();
   private ffmpeg       = new FFmpegAgent();
   private music        = new MusicAgent();
   private voiceover    = new VoiceoverAgent();
-  private imagePrompt  = new ImagePromptAgent();
   private imagen3      = new Imagen3Agent();
   private veo          = new VeoAgent();
   private lipsync      = new LipsyncAgent();
-  private pexels       = new PexelsClient();
   private config       = getConfig();
 
-  async processSingleByRowIndex(rowIndex: number): Promise<PipelineResult> {
+  async processSingleByRowIndex(
+    rowIndex:      number,
+    renderVariant?: RenderVariant,
+    hookStyle?:     HookStyle,
+    dbJobId?:       string
+  ): Promise<PipelineResult> {
     await this.sheets.initializeSheet();
     const all = await this.sheets.getAllContent();
     const row = all.find((r) => r.rowIndex === rowIndex);
     if (!row) throw new Error(`V2 Row ${rowIndex} not found in ${SHEET_NAME}`);
 
-    // Fill script if missing — try ScriptWriter (Anthropic), fall back to template
+    // Fill script if missing — try ScriptWriter with variant, fall back to template
     if (!row.script || row.script.trim().length < 10) {
-      const generated = await this.scriptWriter.fillMissingScripts([row]);
-      const gen = generated.get(rowIndex);
-      if (gen) {
+      try {
+        const gen = await this.scriptWriter.generateScript(
+          row.topic, row.style,
+          { a: row.hookA, b: row.hookB, c: row.hookC },
+          hookStyle ?? "question",
+          renderVariant
+        );
         row.script = gen.script;
         row.hookA  = row.hookA || gen.hookA;
         row.hookB  = row.hookB || gen.hookB;
         row.hookC  = row.hookC || gen.hookC;
         await this.sheets.updateScript(rowIndex, row.script, row.hookA, row.hookB, row.hookC);
-      } else if (!row.script || row.script.trim().length < 10) {
-        row.script = templateScript(row.topic);
-        console.log("[v2] Using template script (no ANTHROPIC_API_KEY)");
+        console.log(`[v2] Script generated — variant: ${renderVariant ?? "default"}, hook: ${hookStyle ?? "question"}`);
+      } catch (err) {
+        if (!row.script || row.script.trim().length < 10) {
+          row.script = templateScript(row.topic);
+          console.log("[v2] Using template script (ScriptWriter unavailable)");
+        }
       }
     }
 
@@ -104,94 +120,101 @@ export class PipelineOrchestratorV2 {
       await this.sheets.updateStatus(rowIndex, "Processing");
       setStatus("running", row.topic, 5);
 
-      emitLog("V2-Orchestrator", "Generating voiceover...", "info");
-      const voicePath = await this.voiceover.generate(row.script, tempDir, row.voice) ?? undefined;
-      if (voicePath) emitLog("V2-Orchestrator", "Voiceover ready", "success");
-      setStatus("running", row.topic, 20);
+      // ── Step 1: Generate dynamic storyboard (Gemini creative director) ──────
+      emitLog("V2-Orchestrator", `Building storyboard (variant: ${renderVariant ?? "problem-first"}, hook: ${hookStyle ?? "shock"})...`, "agent");
+      const sb: Storyboard = await this.storyboard.generate(
+        row.topic, row.style,
+        renderVariant ?? "problem-first",
+        hookStyle     ?? "shock"
+      );
+      emitLog("V2-Orchestrator", `Storyboard: ${sb.scenes.length} scenes, ${(sb.totalFrames / 30).toFixed(1)}s, style=${sb.visualStyle}`, "success");
+      setStatus("running", row.topic, 15);
 
-      // public/content/{slug}/ — shared by voiceover + scene images (Remotion needs HTTP access)
+      // Write script back to sheet for record-keeping
+      const sheetScript = sb.fullScript;
+      const hookLines   = sb.scenes.filter(s => s.beat === "hook").map(s => s.caption);
+      await this.sheets.updateScript(rowIndex, sheetScript, hookLines[0] ?? "", hookLines[1] ?? "", hookLines[2] ?? "")
+        .catch(() => {}); // non-fatal
+
+      // ── Step 2: ElevenLabs voiceover from fullScript ──────────────────────
       const publicContent = path.resolve("public", "content", slug);
       fs.mkdirSync(publicContent, { recursive: true });
 
+      emitLog("V2-Orchestrator", "Generating voiceover...", "info");
+      const voicePath = await this.voiceover.generate(sb.fullScript, tempDir, row.voice) ?? undefined;
       if (voicePath) {
-        try {
-          fs.copyFileSync(voicePath, path.join(publicContent, "voiceover.mp3"));
-        } catch { /* voiceover file unavailable */ }
+        emitLog("V2-Orchestrator", "Voiceover ready", "success");
+        try { fs.copyFileSync(voicePath, path.join(publicContent, "voiceover.mp3")); } catch { /* skip */ }
       }
+      setStatus("running", row.topic, 28);
 
-      emitLog("V2-Orchestrator", "Generating scene prompts...", "info");
-      const scenePrompts = await this.imagePrompt.generateScenePrompts(row.topic, row.script, row.style);
-      setStatus("running", row.topic, 35);
-
-      // ── Tier 1: VeoAgent — Google Veo 2 text-to-video (official API, GOOGLE_API_KEY) ──
+      // ── Step 3: Veo clips — one per storyboard scene ──────────────────────
       const clipUrlMap: Record<string, string> = {};
-      const sceneMap:   Record<string, { url: string; tempPath: string }> = {};
-      const sceneTextPrompts = {
-        hook:    scenePrompts.hook.imagePrompt,
-        insight: scenePrompts.insight.imagePrompt,
-        cta:     scenePrompts.cta.imagePrompt,
-      };
+      const imageUrlMap: Record<string, string> = {};
 
       if (VeoAgent.isAvailable()) {
-        emitLog("V2-Orchestrator", "Generating clips via Google Veo 2 (official API)...", "info");
-        try {
-          const veoClips = await this.veo.generateScenesFromText(sceneTextPrompts, slug, tempDir);
-          for (const clip of veoClips) {
-            const destFile = `clip-${clip.beat}.mp4`;
-            fs.copyFileSync(clip.clipPath, path.join(publicContent, destFile));
-            clipUrlMap[clip.beat] = `/content/${slug}/${destFile}`;
+        emitLog("V2-Orchestrator", `Generating ${sb.scenes.length} Veo clips...`, "info");
+        await Promise.all(sb.scenes.map(async (scene, i) => {
+          const outFile = `clip-${scene.id}.mp4`;
+          const outPath = path.join(tempDir, outFile);
+          const veoDur  = clampVeoDuration(scene.seconds);
+          const clipPath = await this.veo.generateSingleClip(scene.visualPrompt, outPath, veoDur);
+          if (clipPath) {
+            try { fs.copyFileSync(clipPath, path.join(publicContent, outFile)); } catch { /* skip */ }
+            clipUrlMap[scene.id] = `/content/${slug}/${outFile}`;
+            emitLog("V2-Orchestrator", `Veo clip ${i + 1}/${sb.scenes.length} — ${scene.beat} (${veoDur}s)`, "success");
+          } else {
+            emitLog("V2-Orchestrator", `Veo scene ${scene.id} failed — will use Imagen3`, "warning");
           }
-          emitLog("V2-Orchestrator", `Veo: ${veoClips.length}/3 clips`, veoClips.length === 3 ? "success" : "warning");
-        } catch (err) {
-          emitLog("V2-Orchestrator", `Veo failed: ${err instanceof Error ? err.message : err} — using Imagen 3 fallback`, "warning");
-        }
+        }));
       }
 
-      // ── Tier 2: Imagen 3 static images — fallback for any missing beats ──
-      const stillMissing = (["hook", "insight", "cta"] as const).filter(b => !clipUrlMap[b]);
-      if (stillMissing.length > 0) {
-        emitLog("V2-Orchestrator", `Imagen 3 fallback for: ${stillMissing.join(", ")}`, "info");
-        const sceneImages = await this.imagen3.generateSceneImages(
-          { hook: sceneTextPrompts.hook, insight: sceneTextPrompts.insight, cta: sceneTextPrompts.cta },
-          slug, tempDir
-        ).catch(() => []);
-
-        for (const si of sceneImages) {
-          if (clipUrlMap[si.beat]) continue;
-          const destFile = `scene-${si.beat}.jpg`;
-          try { fs.copyFileSync(si.imagePath, path.join(publicContent, destFile)); } catch { /* skip */ }
-          sceneMap[si.beat] = { url: `/content/${slug}/${destFile}`, tempPath: si.imagePath };
-        }
-        if (sceneImages.length > 0) emitLog("V2-Orchestrator", `Imagen 3: ${sceneImages.length} static fallbacks`, "info");
+      // ── Step 4: Imagen3 static fallback for scenes missing a clip ─────────
+      const missingScenes = sb.scenes.filter(s => !clipUrlMap[s.id]);
+      if (missingScenes.length > 0) {
+        emitLog("V2-Orchestrator", `Imagen3 fallback for ${missingScenes.length} scene(s)...`, "info");
+        await Promise.all(missingScenes.map(async (scene) => {
+          try {
+            const destFile = `scene-${scene.id}.jpg`;
+            const outPath  = path.join(tempDir, destFile);
+            const imgPath  = await this.imagen3.generateSingleImage(scene.visualPrompt, outPath);
+            if (imgPath) {
+              try { fs.copyFileSync(imgPath, path.join(publicContent, destFile)); } catch { /* skip */ }
+              imageUrlMap[scene.id] = `/content/${slug}/${destFile}`;
+            }
+          } catch { /* skip — scene renders with black bg */ }
+        }));
       }
+      setStatus("running", row.topic, 55);
 
-      setStatus("running", row.topic, 50);
-
-      // D-ID lipsync: talking head for insight scene — only when avatar URL is explicitly set in sheet
-      if (LipsyncAgent.isAvailable() && voicePath && !clipUrlMap["insight"] && row.avatarUrl?.trim()) {
+      // D-ID lipsync on first insight scene — only when avatar URL set in sheet
+      const insightScene = sb.scenes.find(s => s.beat === "insight");
+      if (LipsyncAgent.isAvailable() && voicePath && insightScene && !clipUrlMap[insightScene.id] && row.avatarUrl?.trim()) {
         emitLog("V2-Orchestrator", "Downloading avatar for D-ID lipsync...", "info");
         try {
           const avatarDest = path.join(tempDir, "avatar.jpg");
-          await this.pexels.downloadUrl(row.avatarUrl.trim(), avatarDest);
+          const avatarRes  = await fetch(row.avatarUrl.trim());
+          if (avatarRes.ok) fs.writeFileSync(avatarDest, Buffer.from(await avatarRes.arrayBuffer()));
           if (fs.existsSync(avatarDest)) {
             const lipsyncClip = await this.lipsync.generateTalkingHead(avatarDest, voicePath, tempDir);
             if (lipsyncClip) {
-              const destFile = "lipsync-insight.mp4";
+              const destFile = `lipsync-${insightScene.id}.mp4`;
               try { fs.copyFileSync(lipsyncClip, path.join(publicContent, destFile)); } catch { /* ignore */ }
-              clipUrlMap["insight"] = `/content/${slug}/${destFile}`;
-              emitLog("V2-Orchestrator", "Talking head ready for insight scene", "success");
+              clipUrlMap[insightScene.id] = `/content/${slug}/${destFile}`;
+              emitLog("V2-Orchestrator", "Talking head ready", "success");
             }
           }
         } catch (err) {
           console.warn("[v2] Lipsync failed:", err instanceof Error ? err.message : err);
         }
       }
-      setStatus("running", row.topic, 62);
 
-      emitLog("V2-Orchestrator", "Selecting background music...", "info");
+      // ── Step 5: Music ─────────────────────────────────────────────────────
+      emitLog("V2-Orchestrator", `Selecting ${sb.musicMood} music...`, "info");
+      const moodMap: Record<string, string> = { tense: "dramatic", uplifting: "energetic", mysterious: "mysterious", energetic: "energetic", calm: "calm" };
       const designStub: DesignSpec = {
-        theme: "minimal", mood: "professional", overlayStyle: "gradient", overlayOpacity: 0.5,
-        fontWeight: "bold", textEffect: "shadow", rationale: "V2 default",
+        theme: "minimal", mood: (moodMap[sb.musicMood] ?? "professional") as import("../design/design-agent").Mood, overlayStyle: "gradient", overlayOpacity: 0.5,
+        fontWeight: "bold", textEffect: "shadow", rationale: `V2 ${sb.visualStyle}`,
         brandColors: { primary: "#ffffff", secondary: "#cccccc", accent: "#FFE500", background: "#000000", text: "#ffffff" },
       };
       const musicTrack = await this.music.selectTrack(row, designStub, slug, tempDir).catch(() => null);
@@ -199,13 +222,19 @@ export class PipelineOrchestratorV2 {
 
       const voiceoverUrl = voicePath ? `/content/${slug}/voiceover.mp3` : undefined;
 
+      // ── Step 6: Assemble storyboard data for Remotion ─────────────────────
+      const storyboardData = {
+        ...sb,
+        scenes: sb.scenes.map(scene => ({
+          ...scene,
+          videoClipPath: clipUrlMap[scene.id],
+          imagePath:     imageUrlMap[scene.id] ?? "",
+        })),
+      };
+
       const videoData: V2UGCData = {
-        topic: row.topic,
-        scenes: {
-          hook:    { imagePath: sceneMap["hook"]?.url    || "", videoClipPath: clipUrlMap["hook"],    caption: scenePrompts.hook.caption,    keyWord: scenePrompts.hook.keyWord    },
-          insight: { imagePath: sceneMap["insight"]?.url || "", videoClipPath: clipUrlMap["insight"], caption: scenePrompts.insight.caption, keyWord: scenePrompts.insight.keyWord },
-          cta:     { imagePath: sceneMap["cta"]?.url     || "", videoClipPath: clipUrlMap["cta"],     caption: scenePrompts.cta.caption,     keyWord: scenePrompts.cta.keyWord     },
-        },
+        topic:       row.topic,
+        storyboard:  storyboardData,
         voiceoverUrl,
       };
 
@@ -254,7 +283,9 @@ export class PipelineOrchestratorV2 {
       setStatus("running", row.topic, 90);
 
       emitLog("V2-Orchestrator", "Sending to Telegram for approval...", "info");
-      const approval = await this.approvalBot.sendVideoForApproval(finalVideo, row.topic, slug);
+      // Use short job key for Telegram callback (avoids 64-byte limit on long slugs)
+      const cbKey = dbJobId ? dbJobId.slice(0, 16) : slug.slice(0, 55);
+      const approval = await this.approvalBot.sendVideoForApproval(finalVideo, row.topic, cbKey);
 
       if (approval.decision === "approved") {
         await this.sheets.markComplete(rowIndex, finalVideo);
