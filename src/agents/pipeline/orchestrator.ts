@@ -14,6 +14,7 @@ import { SeoGenerator } from "../seo/seo-generator";
 import { DesignAgent } from "../design/design-agent";
 import { ScriptWriterAgent } from "../scriptwriter/scriptwriter-agent";
 import { sanitizeScript } from "../scriptwriter/scriptwriter-agent";
+import type { HookStyle, RenderVariant } from "../scriptwriter/scriptwriter-agent";
 import { StoryboardAgent } from "../storyboard/storyboard-agent";
 import { FFmpegAgent } from "../ffmpeg/ffmpeg-agent";
 import { BrandingAgent } from "../branding/branding-agent";
@@ -21,6 +22,7 @@ import { MusicAgent } from "../music/music-agent";
 import { VoiceoverAgent } from "../voiceover/voiceover-agent";
 import { getConfig } from "../config/config";
 import { setStatus } from "../../lib/pipeline-store";
+import { getLastTemplatesForTopic } from "../../lib/db";
 import { uploadVideoToDrive } from "../../lib/google-drive";
 import { slugify } from "../../lib/slug-utils";
 import * as path from "path";
@@ -56,22 +58,40 @@ export class PipelineOrchestrator {
   private voiceover      = new VoiceoverAgent();
   private config         = getConfig();
 
-  async processSingleByRowIndex(rowIndex: number, templateOverride?: string): Promise<PipelineResult> {
+  async processSingleByRowIndex(
+    rowIndex: number,
+    templateOverride?: string,
+    renderVariant?: RenderVariant,
+    hookStyle?: HookStyle
+  ): Promise<PipelineResult> {
     await this.sheets.initializeSheet();
     const all = await this.sheets.getAllContent();
     const row = all.find((r) => r.rowIndex === rowIndex);
     if (!row) throw new Error(`Row ${rowIndex} not found in sheet`);
 
-    // Fill missing script before rendering
     if (!row.script || row.script.trim().length < 10) {
-      const generated = await this.scriptWriter.fillMissingScripts([row]);
-      const gen = generated.get(rowIndex);
-      if (gen) {
+      try {
+        const gen = await this.scriptWriter.generateScript(
+          row.topic, row.style,
+          { a: row.hookA, b: row.hookB, c: row.hookC },
+          hookStyle ?? "question",
+          renderVariant
+        );
         row.script = gen.script;
         if (!row.hookA) row.hookA = gen.hookA;
         if (!row.hookB) row.hookB = gen.hookB;
         if (!row.hookC) row.hookC = gen.hookC;
         await this.sheets.updateScript(rowIndex, row.script, row.hookA, row.hookB, row.hookC);
+      } catch {
+        const generated = await this.scriptWriter.fillMissingScripts([row]);
+        const gen = generated.get(rowIndex);
+        if (gen) {
+          row.script = gen.script;
+          if (!row.hookA) row.hookA = gen.hookA;
+          if (!row.hookB) row.hookB = gen.hookB;
+          if (!row.hookC) row.hookC = gen.hookC;
+          await this.sheets.updateScript(rowIndex, row.script, row.hookA, row.hookB, row.hookC);
+        }
       }
     }
 
@@ -212,7 +232,8 @@ export class PipelineOrchestrator {
       // ── 7. Render ────────────────────────────────────────────
       setStatus("running", row.topic, 60);
       await this.sheets.updateStatus(row.rowIndex, "Rendering");
-      const template = templateOverride ?? RenderAgent.selectTemplate(row.topic, row.style);
+      const recentTemplates = await getLastTemplatesForTopic(row.topic);
+      const template = templateOverride ?? await RenderAgent.selectTemplate(row.topic, row.style, recentTemplates);
       console.log(`[${slug}] Rendering video (template: ${template})...`);
 
       const renderResult = await this.renderAgent.render(slug, videoData, tempDir, template);

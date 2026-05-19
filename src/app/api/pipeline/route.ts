@@ -11,11 +11,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SheetsClient } from "@/agents/sheets/client";
 import { RenderAgent } from "@/agents/render/render-agent";
-import { createJob, upsertContentRow } from "@/lib/db";
+import { createJob, upsertContentRow, getLastTemplatesForTopic } from "@/lib/db";
 import { enqueueRender } from "@/lib/queue";
+import type { RenderVariant } from "@/lib/queue";
 import { emitLog, setStatus, clearLogs } from "@/lib/pipeline-store";
 
 const ALL_TEMPLATES = ["listicle", "stats-story", "tutorial", "myth-buster", "quote-card", "cinematic"];
+const ALL_VARIANTS: RenderVariant[] = ["problem-first", "stat-first", "story-arc", "myth-bust"];
+const ALL_HOOK_STYLES = ["question", "bold-statement", "conflict", "promise", "shock", "story"];
+
+function randomVariant(): RenderVariant { return ALL_VARIANTS[Math.floor(Math.random() * ALL_VARIANTS.length)]; }
+function randomHookStyle(): string      { return ALL_HOOK_STYLES[Math.floor(Math.random() * ALL_HOOK_STYLES.length)]; }
 
 export async function POST(req: NextRequest) {
   const body             = await req.json().catch(() => ({})) as { rowIndex?: number; template?: string };
@@ -38,7 +44,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `Row ${singleRowIndex} not found` }, { status: 404 });
       }
 
-      const template = templateOverride ?? RenderAgent.selectTemplate(row.topic, row.style);
+      const recentTemplates = await getLastTemplatesForTopic(row.topic);
+      const template = templateOverride ?? await RenderAgent.selectTemplate(row.topic, row.style, recentTemplates);
+      const renderVariant = randomVariant();
+      const hookStyle     = randomHookStyle();
 
       await upsertContentRow({
         row_index: row.rowIndex, topic: row.topic, style: row.style, voice: row.voice,
@@ -46,7 +55,7 @@ export async function POST(req: NextRequest) {
       });
 
       const job = await createJob(row.rowIndex, row.topic, template);
-      await enqueueRender({ rowIndex: row.rowIndex, template, topic: row.topic, dbJobId: job.id });
+      await enqueueRender({ rowIndex: row.rowIndex, template, topic: row.topic, dbJobId: job.id, renderVariant, hookStyle });
       await sheets.updateStatus(row.rowIndex, "Queued");
 
       setStatus("running", row.topic, 10);
@@ -63,12 +72,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, queued: 0, jobs: [] });
       }
 
-      const shuffled = [...ALL_TEMPLATES].sort(() => Math.random() - 0.5);
       const jobs = [];
 
-      for (let i = 0; i < pending.length; i++) {
-        const row      = pending[i];
-        const template = shuffled[i % shuffled.length];
+      for (const row of pending) {
+        const recentTemplates = await getLastTemplatesForTopic(row.topic);
+        const template      = await RenderAgent.selectTemplate(row.topic, row.style, recentTemplates);
+        const renderVariant = randomVariant();
+        const hookStyle     = randomHookStyle();
 
         await upsertContentRow({
           row_index: row.rowIndex, topic: row.topic, style: row.style, voice: row.voice,
@@ -76,10 +86,10 @@ export async function POST(req: NextRequest) {
         });
 
         const job = await createJob(row.rowIndex, row.topic, template);
-        await enqueueRender({ rowIndex: row.rowIndex, template, topic: row.topic, dbJobId: job.id });
+        await enqueueRender({ rowIndex: row.rowIndex, template, topic: row.topic, dbJobId: job.id, renderVariant, hookStyle });
         await sheets.updateStatus(row.rowIndex, "Queued");
-        jobs.push({ id: job.id, topic: row.topic, template });
-        emitLog("Orchestrator", `Queued: ${row.topic} (${template})`, "info");
+        jobs.push({ id: job.id, topic: row.topic, template, renderVariant });
+        emitLog("Orchestrator", `Queued: ${row.topic} (${template} / ${renderVariant})`, "info");
       }
 
       setStatus("running", "", 10);

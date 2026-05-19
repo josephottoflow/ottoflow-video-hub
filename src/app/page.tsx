@@ -1683,39 +1683,77 @@ const OWN_TOPIC_TEMPLATES = [
 ];
 
 const OWN_TOPIC_STYLES = ["Educational", "Motivational", "Case Study", "Lifestyle", "Startup-focused", "Luxury", "Neon"];
+const OWN_TOPIC_VOICES = ["Female energetic", "Female calm", "Male energetic", "Male calm"];
+
+interface TopicSuggestion { topic: string; style: string; angle: string; hookPreview: string; }
+type TopicTab = "single" | "batch" | "ai";
+
+const tabBtnStyle = (active: boolean): React.CSSProperties => ({
+  padding: "7px 18px", borderRadius: 20, border: `1px solid ${active ? "rgba(99,102,241,0.5)" : "var(--border)"}`,
+  cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+  background: active ? "rgba(99,102,241,0.12)" : "transparent",
+  color: active ? "var(--accent)" : "var(--text-muted)", transition: "all 0.12s",
+});
+
+const stylePillStyle = (active: boolean): React.CSSProperties => ({
+  padding: "5px 13px", borderRadius: 20, border: "1px solid var(--border)",
+  cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit",
+  background: active ? "var(--primary)" : "transparent",
+  color: active ? "#fff" : "var(--text-muted)", transition: "all 0.12s",
+});
+
+const primaryBtn = (disabled: boolean): React.CSSProperties => ({
+  width: "100%", padding: "13px 24px", borderRadius: 11, border: "none",
+  cursor: disabled ? "not-allowed" : "pointer",
+  background: disabled ? "var(--bg-elevated)" : "linear-gradient(135deg,#6366f1 0%,#a78bfa 100%)",
+  color: disabled ? "var(--text-muted)" : "#fff",
+  fontFamily: "inherit", fontSize: 14, fontWeight: 700, letterSpacing: "-0.2px",
+  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+  boxShadow: disabled ? "none" : "0 4px 20px rgba(99,102,241,0.4)", transition: "all 0.2s",
+});
 
 function OwnTopicView({ onGenerate }: { onGenerate: () => void }) {
+  const [activeTab, setActiveTab] = useState<TopicTab>("single");
+
+  // Single tab
   const [topic,      setTopic]      = useState("");
   const [style,      setStyle]      = useState("Educational");
   const [template,   setTemplate]   = useState("listicle");
   const [generating, setGenerating] = useState(false);
 
-  const handleGenerate = async () => {
+  // Batch tab
+  const [batchText,    setBatchText]    = useState("");
+  const [batchStyle,   setBatchStyle]   = useState("Educational");
+  const [batchVoice,   setBatchVoice]   = useState("Female energetic");
+  const [batchLoading, setBatchLoading] = useState(false);
+
+  // AI tab
+  const [niche,       setNiche]       = useState("");
+  const [aiCount,     setAiCount]     = useState(15);
+  const [aiLoading,   setAiLoading]   = useState(false);
+  const [suggestions, setSuggestions] = useState<TopicSuggestion[]>([]);
+  const [selected,    setSelected]    = useState<Set<number>>(new Set());
+  const [queuing,     setQueuing]     = useState(false);
+
+  const handleSingle = async () => {
     const t = topic.trim();
     if (!t) { toast.error("Enter a topic first"); return; }
     setGenerating(true);
-
     try {
-      // Step 1: Add to Sheet1 as Pending
       const addRes = await fetch("/api/queue/add", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ topic: t, style }),
       });
       if (!addRes.ok) throw new Error("Failed to add topic to sheet");
       const { rowIndex } = await addRes.json();
-
-      // Step 2: Immediately queue a render for that row
       const renderRes = await fetch("/api/pipeline", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rowIndex, template }),
       });
       if (!renderRes.ok) throw new Error("Failed to queue render job");
-
       toast.success(`Queued: "${t}" — watch progress in Command Center`);
       setTopic("");
-      onGenerate(); // navigate to Command Center
+      onGenerate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -1723,120 +1761,259 @@ function OwnTopicView({ onGenerate }: { onGenerate: () => void }) {
     }
   };
 
+  const handleBatch = async () => {
+    const lines = batchText.split("\n").map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) { toast.error("Enter at least one topic"); return; }
+    setBatchLoading(true);
+    try {
+      const res = await fetch("/api/topics", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topics: lines, style: batchStyle, voice: batchVoice, autoQueue: true }),
+      });
+      if (!res.ok) throw new Error("Failed to queue topics");
+      const data = await res.json();
+      toast.success(`Queued ${data.queued} topic(s) — watch in Command Center`);
+      setBatchText("");
+      onGenerate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  const handleAiGenerate = async () => {
+    if (!niche.trim()) { toast.error("Enter a niche first"); return; }
+    setAiLoading(true); setSuggestions([]); setSelected(new Set());
+    try {
+      const res = await fetch("/api/topics/generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ niche: niche.trim(), count: aiCount }),
+      });
+      if (!res.ok) throw new Error("Failed to generate topics");
+      const data = await res.json();
+      const list: TopicSuggestion[] = data.suggestions || [];
+      setSuggestions(list);
+      setSelected(new Set(list.map((_, i) => i)));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleQueueSelected = async () => {
+    const picks = [...selected].map(i => suggestions[i]).filter(Boolean);
+    if (picks.length === 0) { toast.error("Select at least one topic"); return; }
+    setQueuing(true);
+    try {
+      const res = await fetch("/api/topics", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topics: picks.map(s => s.topic), style: picks[0]?.style || "Educational", autoQueue: true }),
+      });
+      if (!res.ok) throw new Error("Failed to queue topics");
+      const data = await res.json();
+      toast.success(`Queued ${data.queued} topic(s) — watch in Command Center`);
+      setSuggestions([]); setSelected(new Set());
+      onGenerate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setQueuing(false);
+    }
+  };
+
+  const toggleAll = () => {
+    if (selected.size === suggestions.length) setSelected(new Set());
+    else setSelected(new Set(suggestions.map((_, i) => i)));
+  };
+
+  const textareaStyle: React.CSSProperties = {
+    width: "100%", resize: "vertical", background: "var(--bg-elevated)",
+    border: "1px solid var(--border)", borderRadius: 9, color: "var(--text)",
+    fontFamily: "inherit", fontSize: 13, padding: "11px 14px", outline: "none",
+    transition: "border-color 0.15s", boxSizing: "border-box",
+  };
+
   return (
     <div style={{ padding: "28px 32px", maxWidth: 860, margin: "0 auto" }}>
-      <div style={{ marginBottom: 32 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
-          <div style={{ width: 40, height: 40, borderRadius: 11, background: "linear-gradient(135deg,#6366f1,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 20px rgba(99,102,241,0.4)" }}>
-            <PenLine size={18} color="#fff" strokeWidth={2} />
-          </div>
-          <div>
-            <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", lineHeight: 1 }}>Own Topic</h1>
-            <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>Basic pipeline · Pexels backgrounds · renders on your local machine</p>
-          </div>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+        <div style={{ width: 40, height: 40, borderRadius: 11, background: "linear-gradient(135deg,#6366f1,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 20px rgba(99,102,241,0.4)" }}>
+          <PenLine size={18} color="#fff" strokeWidth={2} />
+        </div>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", lineHeight: 1 }}>Topics</h1>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 3 }}>Add topics manually, in batch, or let AI generate angles from a niche</p>
         </div>
       </div>
 
-      {/* Topic input */}
-      <div className="card" style={{ padding: 20, marginBottom: 16 }}>
-        <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 10 }}>
-          Topic / Prompt
-        </label>
-        <textarea
-          value={topic}
-          onChange={e => setTopic(e.target.value)}
-          placeholder="e.g. The OODA Loop — how to make faster decisions than your competitors"
-          rows={3}
-          style={{
-            width: "100%", resize: "vertical", background: "var(--bg-elevated)",
-            border: "1px solid var(--border)", borderRadius: 9, color: "var(--text)",
-            fontFamily: "inherit", fontSize: 13, padding: "11px 14px", outline: "none",
-            transition: "border-color 0.15s", boxSizing: "border-box",
-          }}
-          onFocus={e => (e.target.style.borderColor = "rgba(99,102,241,0.5)")}
-          onBlur={e  => (e.target.style.borderColor = "var(--border)")}
-        />
-        <div style={{ marginTop: 12 }}>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>Style</label>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {OWN_TOPIC_STYLES.map(s => (
-              <button key={s} onClick={() => setStyle(s)} style={{
-                padding: "5px 13px", borderRadius: 20, border: "1px solid var(--border)",
-                cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit",
-                background: style === s ? "var(--primary)" : "transparent",
-                color: style === s ? "#fff" : "var(--text-muted)",
-                transition: "all 0.12s",
-              }}>{s}</button>
-            ))}
-          </div>
-        </div>
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        <button style={tabBtnStyle(activeTab === "single")} onClick={() => setActiveTab("single")}>Single Topic</button>
+        <button style={tabBtnStyle(activeTab === "batch")}  onClick={() => setActiveTab("batch")}>Add Batch</button>
+        <button style={tabBtnStyle(activeTab === "ai")}     onClick={() => setActiveTab("ai")}>AI Generate</button>
       </div>
 
-      {/* Template picker */}
-      <div className="card" style={{ padding: 20, marginBottom: 20 }}>
-        <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 14 }}>
-          Template
-        </label>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-          {OWN_TOPIC_TEMPLATES.map(({ id, label, Icon, desc }) => {
-            const selected = template === id;
-            return (
-              <motion.button
-                key={id}
-                onClick={() => setTemplate(id)}
-                whileHover={{ y: -2 }}
-                transition={{ duration: 0.12 }}
-                style={{
-                  background: selected ? "rgba(99,102,241,0.12)" : "var(--bg-elevated)",
-                  border: `1px solid ${selected ? "rgba(99,102,241,0.45)" : "var(--border)"}`,
-                  borderRadius: 11, padding: "14px 14px 12px",
-                  cursor: "pointer", textAlign: "left", fontFamily: "inherit",
-                  boxShadow: selected ? "0 0 0 1px rgba(99,102,241,0.2), 0 4px 16px rgba(99,102,241,0.15)" : "none",
-                  transition: "border-color 0.15s, background 0.15s",
-                }}
-              >
-                <div style={{ width: 34, height: 34, borderRadius: 9, marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", background: selected ? "linear-gradient(135deg,#6366f1,#a78bfa)" : "var(--bg)", border: `1px solid ${selected ? "transparent" : "var(--border)"}`, transition: "all 0.15s" }}>
-                  <Icon size={15} color={selected ? "#fff" : "var(--text-muted)"} strokeWidth={selected ? 2.5 : 1.8} />
+      {/* ── Single Topic ── */}
+      {activeTab === "single" && (
+        <>
+          <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 10 }}>Topic / Prompt</label>
+            <textarea
+              value={topic} onChange={e => setTopic(e.target.value)} rows={3}
+              placeholder="e.g. The OODA Loop — how to make faster decisions than your competitors"
+              style={textareaStyle}
+              onFocus={e => (e.target.style.borderColor = "rgba(99,102,241,0.5)")}
+              onBlur={e  => (e.target.style.borderColor = "var(--border)")}
+            />
+            <div style={{ marginTop: 12 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>Style</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {OWN_TOPIC_STYLES.map(s => <button key={s} onClick={() => setStyle(s)} style={stylePillStyle(style === s)}>{s}</button>)}
+              </div>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 14 }}>Template</label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+              {OWN_TOPIC_TEMPLATES.map(({ id, label, Icon, desc }) => {
+                const sel = template === id;
+                return (
+                  <motion.button key={id} onClick={() => setTemplate(id)} whileHover={{ y: -2 }} transition={{ duration: 0.12 }}
+                    style={{ background: sel ? "rgba(99,102,241,0.12)" : "var(--bg-elevated)", border: `1px solid ${sel ? "rgba(99,102,241,0.45)" : "var(--border)"}`, borderRadius: 11, padding: "14px 14px 12px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", boxShadow: sel ? "0 0 0 1px rgba(99,102,241,0.2), 0 4px 16px rgba(99,102,241,0.15)" : "none", transition: "border-color 0.15s, background 0.15s" }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 9, marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "center", background: sel ? "linear-gradient(135deg,#6366f1,#a78bfa)" : "var(--bg)", border: `1px solid ${sel ? "transparent" : "var(--border)"}`, transition: "all 0.15s" }}>
+                      <Icon size={15} color={sel ? "#fff" : "var(--text-muted)"} strokeWidth={sel ? 2.5 : 1.8} />
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: sel ? "var(--accent)" : "var(--text)", marginBottom: 4 }}>{label}</div>
+                    <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.55 }}>{desc}</div>
+                    {sel && <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}><CheckCircle2 size={10} color="var(--accent)" /><span style={{ fontSize: 9, fontWeight: 700, color: "var(--accent)", letterSpacing: "0.4px" }}>SELECTED</span></div>}
+                  </motion.button>
+                );
+              })}
+            </div>
+          </div>
+
+          <button onClick={handleSingle} disabled={generating || !topic.trim()} style={primaryBtn(generating || !topic.trim())}>
+            {generating ? <><Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> Adding to queue…</> : <><Play size={14} fill="currentColor" /> Generate Video</>}
+          </button>
+          <p style={{ marginTop: 10, fontSize: 11, color: "var(--text-muted)", textAlign: "center", lineHeight: 1.7 }}>
+            Each render uses a random narrative variant and hook style for non-redundant output.
+          </p>
+        </>
+      )}
+
+      {/* ── Batch Add ── */}
+      {activeTab === "batch" && (
+        <>
+          <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 10 }}>
+              Topics <span style={{ color: "var(--text-muted)", fontWeight: 400, textTransform: "none" }}>— one per line</span>
+            </label>
+            <textarea
+              value={batchText} onChange={e => setBatchText(e.target.value)} rows={8}
+              placeholder={"Why Six Sigma fails in week 1\nThe automation tool that replaced my $5k/month VA\nHow OKRs actually work in 2026"}
+              style={textareaStyle}
+              onFocus={e => (e.target.style.borderColor = "rgba(99,102,241,0.5)")}
+              onBlur={e  => (e.target.style.borderColor = "var(--border)")}
+            />
+            <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-muted)" }}>
+              {batchText.split("\n").map(l => l.trim()).filter(Boolean).length} topic(s) ready
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+            <div style={{ display: "flex", gap: 24 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>Style</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {OWN_TOPIC_STYLES.map(s => <button key={s} onClick={() => setBatchStyle(s)} style={stylePillStyle(batchStyle === s)}>{s}</button>)}
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: selected ? "var(--accent)" : "var(--text)", marginBottom: 4 }}>{label}</div>
-                <div style={{ fontSize: 10, color: "var(--text-muted)", lineHeight: 1.55 }}>{desc}</div>
-                {selected && (
-                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}>
-                    <CheckCircle2 size={10} color="var(--accent)" />
-                    <span style={{ fontSize: 9, fontWeight: 700, color: "var(--accent)", letterSpacing: "0.4px" }}>SELECTED</span>
-                  </div>
-                )}
-              </motion.button>
-            );
-          })}
-        </div>
-      </div>
+              </div>
+              <div style={{ minWidth: 180 }}>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>Voice</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {OWN_TOPIC_VOICES.map(v => <button key={v} onClick={() => setBatchVoice(v)} style={stylePillStyle(batchVoice === v)}>{v}</button>)}
+                </div>
+              </div>
+            </div>
+          </div>
 
-      {/* Generate button */}
-      <button
-        onClick={handleGenerate}
-        disabled={generating || !topic.trim()}
-        style={{
-          width: "100%", padding: "14px 24px", borderRadius: 11,
-          border: "none", cursor: generating || !topic.trim() ? "not-allowed" : "pointer",
-          background: generating || !topic.trim()
-            ? "var(--bg-elevated)"
-            : "linear-gradient(135deg,#6366f1 0%,#a78bfa 100%)",
-          color: generating || !topic.trim() ? "var(--text-muted)" : "#fff",
-          fontFamily: "inherit", fontSize: 14, fontWeight: 700, letterSpacing: "-0.2px",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-          boxShadow: generating || !topic.trim() ? "none" : "0 4px 20px rgba(99,102,241,0.4)",
-          transition: "all 0.2s",
-        }}
-      >
-        {generating
-          ? <><Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> Adding to queue &amp; rendering…</>
-          : <><Play size={14} fill="currentColor" /> Generate Video</>}
-      </button>
+          <button onClick={handleBatch} disabled={batchLoading || !batchText.trim()} style={primaryBtn(batchLoading || !batchText.trim())}>
+            {batchLoading ? <><Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> Queuing…</> : <><Play size={14} fill="currentColor" /> Add &amp; Queue All</>}
+          </button>
+          <p style={{ marginTop: 10, fontSize: 11, color: "var(--text-muted)", textAlign: "center", lineHeight: 1.7 }}>
+            Each topic gets a unique template, narrative variant, and hook style — no repeated output.
+          </p>
+        </>
+      )}
 
-      <p style={{ marginTop: 12, fontSize: 11, color: "var(--text-muted)", textAlign: "center", lineHeight: 1.7 }}>
-        Topic is saved to Sheet1 then immediately queued. Make sure your local worker (<code style={{ fontFamily: "monospace", background: "var(--bg-elevated)", padding: "1px 5px", borderRadius: 4 }}>npm run worker</code>) is running.
-      </p>
+      {/* ── AI Generate ── */}
+      {activeTab === "ai" && (
+        <>
+          <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 10 }}>Niche</label>
+            <input
+              type="text" value={niche} onChange={e => setNiche(e.target.value)}
+              placeholder="e.g. AI automation for small businesses"
+              onKeyDown={e => e.key === "Enter" && handleAiGenerate()}
+              style={{ ...textareaStyle, height: 42, resize: undefined }}
+              onFocus={e => (e.target.style.borderColor = "rgba(99,102,241,0.5)")}
+              onBlur={e  => (e.target.style.borderColor = "var(--border)")}
+            />
+            <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px" }}>Count</label>
+              {[10, 15, 20].map(n => (
+                <button key={n} onClick={() => setAiCount(n)} style={{ ...stylePillStyle(aiCount === n), padding: "4px 12px" }}>{n}</button>
+              ))}
+            </div>
+          </div>
+
+          <button onClick={handleAiGenerate} disabled={aiLoading || !niche.trim()} style={{ ...primaryBtn(aiLoading || !niche.trim()), marginBottom: 20 }}>
+            {aiLoading ? <><Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> Generating ideas…</> : <><Wand2 size={14} /> Generate Ideas</>}
+          </button>
+
+          {suggestions.length > 0 && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{suggestions.length} suggestions</span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={toggleAll} style={{ ...tabBtnStyle(false), fontSize: 11, padding: "5px 12px" }}>
+                    {selected.size === suggestions.length ? "Deselect all" : "Select all"}
+                  </button>
+                  <button onClick={handleQueueSelected} disabled={queuing || selected.size === 0} style={{ ...primaryBtn(queuing || selected.size === 0), width: "auto", padding: "7px 18px", fontSize: 12 }}>
+                    {queuing ? <><Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> Queuing…</> : <><Play size={12} fill="currentColor" /> Queue Selected ({selected.size})</>}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {suggestions.map((s, i) => {
+                  const isSelected = selected.has(i);
+                  return (
+                    <motion.div key={i} whileHover={{ x: 2 }} transition={{ duration: 0.1 }}
+                      onClick={() => setSelected(prev => { const n = new Set(prev); isSelected ? n.delete(i) : n.add(i); return n; })}
+                      style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "12px 14px", borderRadius: 10, cursor: "pointer", border: `1px solid ${isSelected ? "rgba(99,102,241,0.4)" : "var(--border)"}`, background: isSelected ? "rgba(99,102,241,0.06)" : "var(--bg-elevated)", transition: "all 0.12s" }}>
+                      <div style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${isSelected ? "var(--accent)" : "var(--border)"}`, background: isSelected ? "var(--accent)" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1, transition: "all 0.12s" }}>
+                        {isSelected && <CheckCircle2 size={11} color="#fff" strokeWidth={3} />}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 3, lineHeight: 1.4 }}>{s.topic}</div>
+                        <div style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>{s.hookPreview}</div>
+                      </div>
+                      <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 5, padding: "2px 7px" }}>{s.style}</span>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 5, padding: "2px 7px" }}>{s.angle}</span>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }

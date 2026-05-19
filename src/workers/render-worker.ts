@@ -72,10 +72,10 @@ async function checkRedis(): Promise<void> {
 }
 
 async function processJob(job: Job<RenderJobData>): Promise<void> {
-  const { rowIndex, template, topic, dbJobId, version } = job.data;
+  const { rowIndex, template, topic, dbJobId, version, renderVariant, hookStyle } = job.data;
 
   console.log(`\n[worker] ── Job ${dbJobId} ──`);
-  console.log(`[worker] Topic: ${topic} | Template: ${template} | Version: ${version ?? "v1"} | Row: ${rowIndex}`);
+  console.log(`[worker] Topic: ${topic} | Template: ${template} | Version: ${version ?? "v1"} | Variant: ${renderVariant ?? "default"} | Row: ${rowIndex}`);
 
   // Check if this job was killed via the UI before we start any work
   try {
@@ -99,7 +99,7 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
   try {
     result = version === "v2"
       ? await new PipelineOrchestratorV2().processSingleByRowIndex(rowIndex)
-      : await new PipelineOrchestrator().processSingleByRowIndex(rowIndex, template);
+      : await new PipelineOrchestrator().processSingleByRowIndex(rowIndex, template, renderVariant as any, hookStyle as any);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown pipeline error";
     const durationMs = Date.now() - startTime;

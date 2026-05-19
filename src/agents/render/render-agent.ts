@@ -36,20 +36,31 @@ export class RenderAgent {
     }
   }
 
-  /** Pick a composition based on topic/style keywords. */
-  static selectTemplate(topic: string, style: string): string {
+  /** Pick a composition based on topic/style keywords, avoiding recent repeats. */
+  static async selectTemplate(topic: string, style: string, recentTemplates: string[] = []): Promise<string> {
+    const ALL_TEMPLATES = ["myth-buster", "quote-card", "stats-story", "tutorial", "listicle", "cinematic"];
     const t = `${topic} ${style}`.toLowerCase();
+
+    let preferred = "cinematic";
     if (t.includes("myth") || t.includes("debunk") || t.includes("truth") || t.includes("wrong") || t.includes("lie"))
-      return "myth-buster";
-    if (t.includes("quote") || t.includes("wisdom") || t.includes("insight") || t.includes("thought") || t.includes("mindset"))
-      return "quote-card";
-    if (t.includes("stat") || t.includes("data") || t.includes("number") || t.includes("percent") || t.includes("roi") || t.includes("case study") || t.includes("result"))
-      return "stats-story";
-    if (t.includes("how to") || t.includes("step") || t.includes("tutorial") || t.includes("guide") || t.includes("setup") || t.includes("workflow"))
-      return "tutorial";
-    if (t.includes("top") || t.includes("list") || t.includes("reason") || t.includes("way") || t.includes("tip") || t.includes("educational") || t.includes("principle"))
-      return "listicle";
-    return "cinematic";
+      preferred = "myth-buster";
+    else if (t.includes("quote") || t.includes("wisdom") || t.includes("insight") || t.includes("thought") || t.includes("mindset"))
+      preferred = "quote-card";
+    else if (t.includes("stat") || t.includes("data") || t.includes("number") || t.includes("percent") || t.includes("roi") || t.includes("case study") || t.includes("result"))
+      preferred = "stats-story";
+    else if (t.includes("how to") || t.includes("step") || t.includes("tutorial") || t.includes("guide") || t.includes("setup") || t.includes("workflow"))
+      preferred = "tutorial";
+    else if (t.includes("top") || t.includes("list") || t.includes("reason") || t.includes("way") || t.includes("tip") || t.includes("educational") || t.includes("principle"))
+      preferred = "listicle";
+
+    if (recentTemplates.length > 0 && recentTemplates.includes(preferred)) {
+      const fresh = ALL_TEMPLATES.filter(tmpl => !recentTemplates.includes(tmpl));
+      if (fresh.length > 0) return fresh[0];
+      const nonLatest = ALL_TEMPLATES.filter(tmpl => tmpl !== recentTemplates[0]);
+      return nonLatest[0] ?? preferred;
+    }
+
+    return preferred;
   }
 
   async render(

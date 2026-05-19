@@ -175,6 +175,17 @@ export async function getWorkerHeartbeat(): Promise<Date | null> {
   } catch { return null; }
 }
 
+export async function getLastTemplatesForTopic(topic: string, limit = 3): Promise<string[]> {
+  try {
+    const { rows } = await getDb().query<{ template: string }>(
+      `SELECT template FROM jobs WHERE topic = $1 AND status = 'done'
+       ORDER BY completed_at DESC LIMIT $2`,
+      [topic, limit]
+    );
+    return rows.map(r => r.template);
+  } catch { return []; }
+}
+
 export async function hasProcessingJob(withinMs = 10 * 60 * 1000): Promise<boolean> {
   try {
     const cutoff = new Date(Date.now() - withinMs);

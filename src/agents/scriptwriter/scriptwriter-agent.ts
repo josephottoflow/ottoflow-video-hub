@@ -99,10 +99,31 @@ const HOOK_STYLE_GUIDE: Record<HookStyle, string> = {
 
 // ─── Story arc structure (TikTok default: Hook → Build → Payoff → CTA) ──
 
+export type RenderVariant = "problem-first" | "stat-first" | "story-arc" | "myth-bust";
+
 const STORY_ARC = `Story arc (12 seconds spoken, 3 beats — video is 20s so leave breathing room):
   Beat 1 (0-3s)   HOOK: One punchy sentence. Stop the scroll.
   Beat 2 (3-10s)  INSIGHT: The core idea. One fact, contrast, or revelation. No filler.
   Beat 3 (10-12s) CTA: One sentence max. Save, follow, or comment.`;
+
+const VARIANT_ARC: Record<RenderVariant, string> = {
+  "problem-first": `Story arc (12s spoken, 3 beats):
+  Beat 1 (0-3s)   HOOK: Open with the pain point. One sentence. Stop the scroll.
+  Beat 2 (3-10s)  ESCALATE: Why it's worse than they think. Get specific.
+  Beat 3 (10-12s) FIX: One clear simple solution. End with a soft CTA.`,
+  "stat-first": `Story arc (12s spoken, 3 beats):
+  Beat 1 (0-3s)   HOOK: Drop a shocking specific number or percentage. Nothing else.
+  Beat 2 (3-10s)  CONTEXT: What that number means and why they should care.
+  Beat 3 (10-12s) ACTION: Exactly how to use this insight. Save-worthy.`,
+  "story-arc": `Story arc (12s spoken, 3 beats):
+  Beat 1 (0-3s)   HOOK: "I used to [struggle with X]..." — drop into the story mid-scene.
+  Beat 2 (3-10s)  TURN: "Then I discovered [insight]" — the moment everything changed.
+  Beat 3 (10-12s) RESULT: "Now [specific measurable result]" — make them want it.`,
+  "myth-bust": `Story arc (12s spoken, 3 beats):
+  Beat 1 (0-3s)   HOOK: "Everyone thinks [common belief] but..." — create instant dissonance.
+  Beat 2 (3-10s)  REALITY: "The truth is [Y]" — deliver the counterintuitive fact.
+  Beat 3 (10-12s) WIN: "Here's what actually works." — land strong, no hedging.`,
+};
 
 // ─── Script Writer Agent ──────────────────────────────────────
 
@@ -124,12 +145,14 @@ export class ScriptWriterAgent {
     topic: string,
     style: string,
     existingHooks?: { a?: string; b?: string; c?: string },
-    hookStyle: HookStyle = "question"
+    hookStyle: HookStyle = "question",
+    renderVariant?: RenderVariant
   ): Promise<GeneratedScript> {
     if (!this.client) throw new Error("ANTHROPIC_API_KEY is not set");
     const toneGuide      = STYLE_TONE[style.toLowerCase()] || STYLE_TONE.educational;
     const hookGuide      = HOOK_STYLE_GUIDE[hookStyle];
     const hookHints      = [existingHooks?.a, existingHooks?.b, existingHooks?.c].filter(Boolean).join(", ");
+    const arc            = renderVariant ? VARIANT_ARC[renderVariant] : STORY_ARC;
 
     const prompt = `You are an elite short-form video scriptwriter for TikTok and Instagram Reels.
 
@@ -137,9 +160,10 @@ TOPIC: ${topic}
 CONTENT STYLE: ${style}
 TONE GUIDE: ${toneGuide}
 HOOK STYLE: ${hookStyle} — ${hookGuide}
+${renderVariant ? `NARRATIVE VARIANT: ${renderVariant}` : ""}
 ${hookHints ? `EXISTING HOOK IDEAS: ${hookHints}` : ""}
 
-${STORY_ARC}
+${arc}
 ${HUMAN_VOICE_RULES}
 
 Write a complete content package. Output ONLY valid JSON:

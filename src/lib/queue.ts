@@ -16,13 +16,17 @@ export const redisConnection = new IORedis(
 
 export const RENDER_QUEUE = "render";
 
+export type RenderVariant = "problem-first" | "stat-first" | "story-arc" | "myth-bust";
+
 export interface RenderJobData {
-  rowIndex:   number;
-  template:   string;
-  topic:      string;
-  dbJobId:    string;
-  version?:   "v1" | "v2";
-  sheetName?: string;
+  rowIndex:       number;
+  template:       string;
+  topic:          string;
+  dbJobId:        string;
+  version?:       "v1" | "v2";
+  sheetName?:     string;
+  renderVariant?: RenderVariant;
+  hookStyle?:     string;
 }
 
 export const renderQueue = new Queue<RenderJobData>(RENDER_QUEUE, {
