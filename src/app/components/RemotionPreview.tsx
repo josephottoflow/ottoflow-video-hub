@@ -9,6 +9,7 @@ interface RemotionPreviewProps {
 interface VideoInfo {
   source: "local" | "drive" | null;
   url: string | null;
+  viewUrl?: string | null; // Drive /view link (for "Open in Drive" button)
 }
 
 export function RemotionPreview({ slug }: RemotionPreviewProps) {
@@ -40,10 +41,23 @@ export function RemotionPreview({ slug }: RemotionPreviewProps) {
     );
   }
 
+  // Drive videos cannot be streamed into <video> — use an embedded iframe player instead.
+  if (info.source === "drive") {
+    return (
+      <div style={containerStyle}>
+        <iframe
+          src={info.url}
+          allow="autoplay"
+          style={{ width: "100%", height: "100%", border: "none", borderRadius: 10, display: "block" }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div style={containerStyle}>
       <video
-        src={info.url}
+        src={info.url!}
         controls
         loop
         playsInline
@@ -54,16 +68,16 @@ export function RemotionPreview({ slug }: RemotionPreviewProps) {
 }
 
 export function useVideoInfo(slug: string | undefined): VideoInfo & { loading: boolean } {
-  const [info,    setInfo]    = useState<VideoInfo>({ source: null, url: null });
+  const [info,    setInfo]    = useState<VideoInfo>({ source: null, url: null, viewUrl: null });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!slug) { setLoading(false); return; }
     setLoading(true);
     fetch(`/api/video/${slug}/url`)
-      .then(r => r.ok ? r.json() : { source: null, url: null })
+      .then(r => r.ok ? r.json() : { source: null, url: null, viewUrl: null })
       .then((d: VideoInfo) => { setInfo(d); setLoading(false); })
-      .catch(() => { setInfo({ source: null, url: null }); setLoading(false); });
+      .catch(() => { setInfo({ source: null, url: null, viewUrl: null }); setLoading(false); });
   }, [slug]);
 
   return { ...info, loading };

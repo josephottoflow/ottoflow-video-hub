@@ -19,3 +19,4 @@ outputs/
 public/content/*/
 .mcp.json
 .claude/
+.vercel

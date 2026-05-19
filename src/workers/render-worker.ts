@@ -18,7 +18,7 @@ import { Worker, Job } from "bullmq";
 import { redisConnection, RENDER_QUEUE, RenderJobData } from "../lib/queue";
 import { PipelineOrchestrator }   from "../agents/pipeline/orchestrator";
 import { PipelineOrchestratorV2 } from "../agents/pipeline/orchestrator-v2";
-import { updateJobStatus, markStuckJobsError, getJob } from "../lib/db";
+import { updateJobStatus, markStuckJobsError, getJob, touchWorkerHeartbeat } from "../lib/db";
 import { ensureBrowser } from "@remotion/renderer";
 import { emitLog, inferAgent, inferLevel, setStatus, clearLogs } from "../lib/pipeline-store";
 
@@ -171,6 +171,11 @@ async function startup() {
     console.warn("[worker] Could not clean stuck jobs (DB may be unreachable):", err instanceof Error ? err.message : err);
   }
 
+  // Write a heartbeat to Postgres every 30s so /api/worker-status can detect us reliably.
+  // BullMQ's own heartbeat expires during long renders; this one doesn't.
+  await touchWorkerHeartbeat();
+  const heartbeatInterval = setInterval(touchWorkerHeartbeat, 30_000);
+
   const worker = new Worker<RenderJobData>(RENDER_QUEUE, processJob, {
     connection:    redisConnection,
     concurrency:   CONCURRENCY,
@@ -196,6 +201,7 @@ async function startup() {
 
   async function shutdown() {
     console.log("[worker] Shutting down gracefully...");
+    clearInterval(heartbeatInterval);
     await worker.close();
     await redisConnection.quit();
     process.exit(0);

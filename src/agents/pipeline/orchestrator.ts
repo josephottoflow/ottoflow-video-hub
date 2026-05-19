@@ -253,7 +253,10 @@ export class PipelineOrchestrator {
       fs.copyFileSync(finalVideoPath, finalVideo);
 
       // Upload to Google Drive for cloud access
-      const driveLink = await uploadVideoToDrive(finalVideo, `${slug}.mp4`).catch(() => null);
+      const driveLink = await uploadVideoToDrive(finalVideo, `${slug}.mp4`).catch((err) => {
+        console.warn(`[${slug}] Drive upload failed:`, err instanceof Error ? err.message : err);
+        return null;
+      });
       if (driveLink) console.log(`[${slug}] Uploaded to Drive: ${driveLink}`);
 
       // ── SEO metadata (rule-based, no API key required) ───────
@@ -297,7 +300,7 @@ export class PipelineOrchestrator {
         fs.unlinkSync(deliveryPath);
       }
 
-      const outputLink = `outputs/${slug}/${slug}.mp4`;
+      const outputLink = driveLink ?? `outputs/${slug}/${slug}.mp4`;
 
       // Mark sheet complete + all platforms ready
       await this.sheets.markComplete(row.rowIndex, outputLink);

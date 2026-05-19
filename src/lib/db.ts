@@ -134,3 +134,54 @@ export async function markStuckJobsError(olderThanMs = 15 * 60 * 1000): Promise<
   );
   return result.rowCount ?? 0;
 }
+
+export async function updateJobOutputLink(id: string, outputLink: string): Promise<void> {
+  await getDb().query(`UPDATE jobs SET output_link = $2 WHERE id = $1`, [id, outputLink]);
+}
+
+// ── Worker heartbeat ───────────────────────────────────────────────────────────
+// The render worker calls touchWorkerHeartbeat() every 30s.
+// /api/worker-status reads it to confirm the worker is live — more reliable than BullMQ heartbeats
+// which expire during long renders.
+
+async function ensureHeartbeatTable(): Promise<void> {
+  await getDb().query(`
+    CREATE TABLE IF NOT EXISTS worker_heartbeat (
+      id         TEXT PRIMARY KEY DEFAULT 'main',
+      touched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+let _heartbeatTableReady = false;
+
+export async function touchWorkerHeartbeat(): Promise<void> {
+  try {
+    if (!_heartbeatTableReady) { await ensureHeartbeatTable(); _heartbeatTableReady = true; }
+    await getDb().query(`
+      INSERT INTO worker_heartbeat (id, touched_at) VALUES ('main', NOW())
+      ON CONFLICT (id) DO UPDATE SET touched_at = NOW()
+    `);
+  } catch { /* non-fatal — heartbeat is best-effort */ }
+}
+
+export async function getWorkerHeartbeat(): Promise<Date | null> {
+  try {
+    if (!_heartbeatTableReady) { await ensureHeartbeatTable(); _heartbeatTableReady = true; }
+    const { rows } = await getDb().query<{ touched_at: Date }>(
+      `SELECT touched_at FROM worker_heartbeat WHERE id = 'main'`
+    );
+    return rows[0]?.touched_at ?? null;
+  } catch { return null; }
+}
+
+export async function hasProcessingJob(withinMs = 10 * 60 * 1000): Promise<boolean> {
+  try {
+    const cutoff = new Date(Date.now() - withinMs);
+    const { rows } = await getDb().query<{ count: string }>(
+      `SELECT COUNT(*) AS count FROM jobs WHERE status = 'processing' AND started_at > $1`,
+      [cutoff]
+    );
+    return parseInt(rows[0]?.count ?? "0", 10) > 0;
+  } catch { return false; }
+}

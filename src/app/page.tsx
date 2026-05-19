@@ -263,6 +263,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   const [stuckCount,    setStuckCount]    = useState(0);
   const [activeJobs,    setActiveJobs]    = useState<DbJob[]>([]);
   const [workerOnline,     setWorkerOnline]     = useState<boolean | null>(null);
+  const [workerRestarting, setWorkerRestarting] = useState(false);
   const [workerStarting,   setWorkerStarting]   = useState(false);
   const [showWorkerGuide,  setShowWorkerGuide]  = useState(false);
   const [installingStart,  setInstallingStart]  = useState(false);
@@ -345,32 +346,47 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     return () => clearInterval(t);
   }, []);
 
-  // Poll worker status every 8s
-  // Priority: ask local agent (most reliable) → fall back to BullMQ Redis check
+  // Poll worker status every 8s.
+  // Priority: local agent (PID-level truth) → API (BullMQ + DB heartbeat + processing job).
   useEffect(() => {
     const check = async () => {
-      // 1. Ask local agent directly — it tracks the worker PID and auto-restarts if dead
+      // 1. Ask local agent — it tracks the PID and knows about crash/restart windows
       const agent = await fetch("http://localhost:7654/worker-status").catch(() => null);
       if (agent?.ok) {
         const d = await agent.json().catch(() => ({}));
-        const alive = d.workerAlive === true;
+        const alive      = d.workerAlive      === true;
+        const restarting = d.workerRestarting === true;
         setWorkerOnline(alive);
-        if (!alive) {
-          // Fetch logs so user can see why worker is offline
+        setWorkerRestarting(restarting);
+        if (!alive && !restarting) {
           const lr = await fetch("http://localhost:7654/logs").catch(() => null);
           if (lr?.ok) { const ld = await lr.json().catch(() => ({})); setWorkerLogs(ld.lines ?? []); }
         }
         return;
       }
-      // 2. Agent not reachable — fall back to BullMQ Redis check (works for Railway worker)
+      // 2. Agent not reachable — use API which checks BullMQ + DB heartbeat + processing job
       const r = await fetch("/api/worker-status").catch(() => null);
-      if (r?.ok) { const d = await r.json(); setWorkerOnline(d.online); }
-      else setWorkerOnline(false);
+      if (r?.ok) {
+        const d = await r.json();
+        setWorkerOnline(d.online);
+        setWorkerRestarting(false);
+      } else {
+        setWorkerOnline(false);
+        setWorkerRestarting(false);
+      }
     };
     check();
     const t = setInterval(check, 8_000);
     return () => clearInterval(t);
   }, []);
+
+  // If DB shows an active processing job, the worker is definitely running — override any stale status.
+  useEffect(() => {
+    if (activeJobs.some(j => j.status === "processing")) {
+      setWorkerOnline(true);
+      setWorkerRestarting(false);
+    }
+  }, [activeJobs]);
 
   // Poll DB jobs every 5s — shows real render status independent of SSE
   useEffect(() => {
@@ -602,8 +618,19 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
         </div>
       </div>
 
+      {/* ── WORKER RESTARTING BANNER ── */}
+      {workerOnline === false && workerRestarting && (
+        <div style={{ padding: "10px 20px", flexShrink: 0, background: "rgba(99,102,241,0.07)", borderBottom: "1px solid rgba(99,102,241,0.18)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Loader2 size={13} style={{ animation: "spin 1s linear infinite", color: "#818cf8" }} />
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#818cf8" }}>Worker Restarting</span>
+            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>— Crashed and coming back up. Ready in ~5 seconds.</span>
+          </div>
+        </div>
+      )}
+
       {/* ── WORKER STATUS BANNER ── */}
-      {workerOnline === false && (
+      {workerOnline === false && !workerRestarting && (
         <div style={{
           padding: "10px 20px", flexShrink: 0,
           background: "rgba(245,158,11,0.07)",
@@ -1130,7 +1157,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
 // ─── Video Preview Modal ──────────────────────────────────────
 
 function VideoPreviewModal({ slug, topic, onClose }: { slug: string; topic: string; onClose: () => void }) {
-  const { url, source, loading } = useVideoInfo(slug);
+  const { url, viewUrl, source, loading } = useVideoInfo(slug);
 
   return (
     <motion.div
@@ -1163,7 +1190,7 @@ function VideoPreviewModal({ slug, topic, onClose }: { slug: string; topic: stri
                 ↓ Download MP4
               </a>
             ) : (
-              <a href={url} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 20px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: "var(--primary-light)", color: "var(--accent)", border: "1px solid rgba(99,102,241,0.25)", textDecoration: "none" }}>
+              <a href={viewUrl ?? url ?? "#"} target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 20px", borderRadius: 8, fontSize: 12, fontWeight: 600, background: "var(--primary-light)", color: "var(--accent)", border: "1px solid rgba(99,102,241,0.25)", textDecoration: "none" }}>
                 ↗ Open in Drive
               </a>
             )

@@ -21,6 +21,7 @@ let workerProc = null;
 // intentional = we killed the worker ourselves, suppress the exit-handler restart
 let intentionalKill  = false;
 let restartScheduled = false;
+let workerRestarting = false; // true during the 5s window between crash and respawn
 
 function log(line) {
   const ts  = new Date().toISOString().slice(11, 19);
@@ -58,7 +59,8 @@ function startWorker() {
     if (lines.length > 200) fs.writeFileSync(LOG_FILE, lines.slice(-200).join("\n"));
   } catch {}
 
-  intentionalKill = false; // reset before spawning so exit handler works normally
+  intentionalKill  = false; // reset before spawning so exit handler works normally
+  workerRestarting = false; // we're spawning now — no longer "restarting"
 
   const proc = spawn("npm", ["run", "worker"], {
     cwd:   PROJ,
@@ -84,6 +86,7 @@ function startWorker() {
     }
 
     log(`[agent] Worker exited unexpectedly (code ${code}) — restarting in 5s`);
+    workerRestarting = true;
     restartScheduled = setTimeout(() => {
       restartScheduled = false;
       startWorker();
@@ -185,7 +188,7 @@ http.createServer((req, res) => {
     }
     res.writeHead(200);
     // Report actual state — don't lie that it's alive while it's still starting
-    res.end(JSON.stringify({ ok: true, workerAlive: alive, pid: workerProc?.pid ?? null }));
+    res.end(JSON.stringify({ ok: true, workerAlive: alive, workerRestarting: !alive && workerRestarting, pid: workerProc?.pid ?? null }));
     return;
   }
 

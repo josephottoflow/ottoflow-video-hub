@@ -44,11 +44,13 @@ export const UnboxingVideo: React.FC<z.infer<typeof unboxingSchema>> = ({ data }
     ? data.simulatedDemo.resultSubtext.split(/[\s#]+/).filter(Boolean)
     : [];
 
-  // Pexels backgrounds — distribute across key scenes
+  // Pexels backgrounds — prefer videos over photos; distribute across key scenes
+  const bgVideos = data.backgrounds?.videos || [];
   const bgPhotos = data.backgrounds?.photos || [];
-  const bgHook = bgPhotos[0] || undefined;
-  const bgFeatures = bgPhotos[1] || undefined;
-  const bgCta = bgPhotos[2] || bgPhotos[0] || undefined;
+  const bg = [...bgVideos, ...bgPhotos]; // videos first, photos as fallback
+  const bgHook     = bg[0] || undefined;
+  const bgFeatures = bg[1] || undefined;
+  const bgCta      = bg[2] || bg[0] || undefined;
 
   let offset = 0;
 

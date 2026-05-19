@@ -240,7 +240,10 @@ export class PipelineOrchestratorV2 {
       fs.copyFileSync(finalVideoPath, finalVideo);
 
       // Upload to Google Drive for cloud access (Vercel + Telegram)
-      const driveLink = await uploadVideoToDrive(finalVideo, `${slug}.mp4`).catch(() => null);
+      const driveLink = await uploadVideoToDrive(finalVideo, `${slug}.mp4`).catch((err) => {
+        emitLog("V2-Orchestrator", `Drive upload failed: ${err instanceof Error ? err.message : err}`, "warning");
+        return null;
+      });
       if (driveLink) emitLog("V2-Orchestrator", `Uploaded to Drive: ${driveLink}`, "success");
 
       setStatus("running", row.topic, 85);
@@ -271,7 +274,7 @@ export class PipelineOrchestratorV2 {
         slug,
         success:    approval.decision === "approved",
         outputDir:  outDir,
-        outputLink: finalVideo,
+        outputLink: driveLink ?? finalVideo,
         timing: {
           startedAt,
           completedAt: new Date().toISOString(),

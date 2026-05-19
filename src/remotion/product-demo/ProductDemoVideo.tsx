@@ -41,10 +41,12 @@ export const ProductDemoVideo: React.FC<z.infer<typeof productDemoSchema>> = ({ 
     ? data.imageShowcase.images[0].path
     : data.featureCallouts.productImagePath;
 
-  // Pexels backgrounds
+  // Pexels backgrounds — prefer videos over photos
+  const bgVideos = data.backgrounds?.videos || [];
   const bgPhotos = data.backgrounds?.photos || [];
-  const bgHook = bgPhotos[0] || undefined;
-  const bgCta = bgPhotos[1] || bgPhotos[0] || undefined;
+  const bg = [...bgVideos, ...bgPhotos]; // videos first, photos as fallback
+  const bgHook = bg[0] || undefined;
+  const bgCta  = bg[1] || bg[0] || undefined;
 
   let offset = 0;
 

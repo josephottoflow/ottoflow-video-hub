@@ -7,7 +7,7 @@
  *   <PexelsBackground src={bgPath} overlay={0.6} zoom={1.15} />
  */
 import React from "react";
-import { AbsoluteFill, Img, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Img, OffthreadVideo, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
 
 interface PexelsBackgroundProps {
   /** Path to the background image (relative to /public) */
@@ -57,19 +57,35 @@ export const PexelsBackground: React.FC<PexelsBackgroundProps> = ({
     }
   })();
 
+  const resolvedSrc = src.startsWith("http") ? src : `/${src}`;
+  const isVideo = /\.(mp4|webm|mov)$/i.test(src);
+
   return (
     <>
-      {/* Image layer */}
+      {/* Media layer — video or image depending on file type */}
       <AbsoluteFill style={{ overflow: "hidden" }}>
-        <Img
-          src={src.startsWith("http") ? src : `/${src}`}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            transform: `scale(${scale}) translateX(${translateX}px)`,
-          }}
-        />
+        {isVideo ? (
+          <OffthreadVideo
+            src={resolvedSrc}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              transform: `scale(${scale}) translateX(${translateX}px)`,
+            }}
+            muted
+          />
+        ) : (
+          <Img
+            src={resolvedSrc}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              transform: `scale(${scale}) translateX(${translateX}px)`,
+            }}
+          />
+        )}
       </AbsoluteFill>
 
       {/* Flat overlay */}

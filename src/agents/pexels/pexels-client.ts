@@ -114,13 +114,15 @@ export class PexelsClient {
   async searchVideos(
     query: string,
     perPage = 5,
-    orientation: "landscape" | "portrait" | "square" = "portrait"
+    orientation: "landscape" | "portrait" | "square" = "portrait",
+    page = 1
   ): Promise<PexelsVideo[]> {
     const params = new URLSearchParams({
       query,
       per_page: String(perPage),
       orientation,
       size: "medium", // Full HD — avoids slow 4K downloads
+      page: String(page),
     });
     const data = await this.fetch<PexelsSearchResult<PexelsVideo>>(`/videos/search?${params}`);
     return data.videos || [];
@@ -245,6 +247,14 @@ export class PexelsClient {
     const destDir = path.resolve("public", "content", slug, "backgrounds");
     fs.mkdirSync(destDir, { recursive: true });
 
+    // Delete cached video files so every render fetches fresh clips.
+    // Photos are cheap to reuse; only videos are purged.
+    if (fs.existsSync(destDir)) {
+      for (const f of fs.readdirSync(destDir)) {
+        if (f.endsWith(".mp4")) fs.unlinkSync(path.join(destDir, f));
+      }
+    }
+
     // Generate smart, topic-specific queries via keyword extraction
     console.log(`[pexels] Generating smart queries for: "${productName}"`);
     const queries = this.generateSmartQueries(productName, style, videoQueries);
@@ -300,14 +310,17 @@ export class PexelsClient {
     for (const query of queries) {
       if (paths.length >= totalCount) break;
 
+      // Random page (1–10) per query so each render pulls different clips from Pexels' 16k library.
+      const page = Math.floor(Math.random() * 10) + 1;
+
       try {
         // Pass 1: portrait
-        const portrait = await this.searchVideos(query, 5, "portrait");
+        const portrait = await this.searchVideos(query, 5, "portrait", page);
         let usable     = this.filterUsableVideos(portrait);
 
         // Pass 2: landscape fallback if portrait gave < 2 usable results
         if (usable.length < 2) {
-          const landscape = await this.searchVideos(query, 5, "landscape");
+          const landscape = await this.searchVideos(query, 5, "landscape", page);
           usable = [...usable, ...this.filterUsableVideos(landscape)];
         }
 
@@ -360,21 +373,39 @@ export class PexelsClient {
     });
   }
 
-  private downloadFile(url: string, destPath: string): Promise<void> {
+  // isRedirect=true means we're hitting a CDN URL — skip the API key header.
+  private downloadFile(url: string, destPath: string, isRedirect = false): Promise<void> {
     return new Promise((resolve, reject) => {
-      const file = fs.createWriteStream(destPath);
-      https.get(url, { headers: { Authorization: this.apiKey } }, (response) => {
+      const file  = fs.createWriteStream(destPath);
+      const opts  = isRedirect ? {} : { headers: { Authorization: this.apiKey } };
+      const timer = setTimeout(() => {
+        file.destroy();
+        if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+        reject(new Error("Download timeout (30s)"));
+      }, 30_000);
+
+      https.get(url, opts, (response) => {
         if (response.statusCode === 301 || response.statusCode === 302) {
+          clearTimeout(timer);
           const redirectUrl = response.headers.location;
           if (redirectUrl) {
             file.close();
             if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
-            return this.downloadFile(redirectUrl, destPath).then(resolve).catch(reject);
+            return this.downloadFile(redirectUrl, destPath, true).then(resolve).catch(reject);
           }
+          file.close();
+          return reject(new Error("Redirect with no Location header"));
+        }
+        if (response.statusCode !== 200) {
+          clearTimeout(timer);
+          file.close();
+          if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+          return reject(new Error(`HTTP ${response.statusCode} downloading ${path.basename(destPath)}`));
         }
         response.pipe(file);
-        file.on("finish", () => { file.close(); resolve(); });
+        file.on("finish", () => { clearTimeout(timer); file.close(); resolve(); });
       }).on("error", (err) => {
+        clearTimeout(timer);
         if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
         reject(err);
       });

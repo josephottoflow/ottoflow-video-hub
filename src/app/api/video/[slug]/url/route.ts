@@ -30,7 +30,13 @@ export async function GET(
     const jobs = await listJobs(200);
     const job  = jobs.find(j => j.topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") === safe);
     if (job?.output_link?.startsWith("http")) {
-      return NextResponse.json({ source: "drive", url: job.output_link });
+      // Convert any Drive /view or /preview URL to /preview for iframe embedding.
+      // Extract file ID from https://drive.google.com/file/d/{id}/...
+      const driveIdMatch = job.output_link.match(/\/file\/d\/([^/]+)/);
+      const embedUrl = driveIdMatch
+        ? `https://drive.google.com/file/d/${driveIdMatch[1]}/preview`
+        : job.output_link;
+      return NextResponse.json({ source: "drive", url: embedUrl, viewUrl: job.output_link });
     }
   } catch { /* DB unavailable */ }
 
