@@ -1642,10 +1642,14 @@ function ReviewCard({ row }: { row: QueueRow }) {
 function ReviewView() {
   const [rows,    setRows]    = useState<QueueRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchErr, setFetchErr] = useState(false);
   const [filter,  setFilter]  = useState<"all" | "complete" | "pending">("all");
 
   useEffect(() => {
-    fetch("/api/queue").then(r => r.json()).then(d => { setRows(d.rows || []); setLoading(false); }).catch(() => setLoading(false));
+    fetch("/api/queue")
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(d => { setRows(d.rows || []); setLoading(false); })
+      .catch(() => { setFetchErr(true); setLoading(false); });
   }, []);
 
   const displayed = rows.filter(row => {
@@ -1668,6 +1672,11 @@ function ReviewView() {
       {loading ? (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))", gap: 16 }}>
           {[1,2,3].map(i => <div key={i} className="skeleton" style={{ height: 160, borderRadius: 12 }} />)}
+        </div>
+      ) : fetchErr ? (
+        <div className="card" style={{ textAlign: "center", padding: "48px 24px", color: "var(--error, #ef4444)", fontSize: 13 }}>
+          <Star size={32} style={{ opacity: 0.15, display: "block", margin: "0 auto 10px" }} />
+          Could not load queue — check your database connection.
         </div>
       ) : displayed.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: "48px 24px", color: "var(--text-muted)", fontSize: 13 }}>

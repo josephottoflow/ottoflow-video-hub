@@ -62,8 +62,26 @@ export async function GET(
 
   if (range) {
     const [startStr, endStr] = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(startStr, 10);
-    const end   = endStr ? parseInt(endStr, 10) : Math.min(start + 1_000_000, total - 1);
+    // Handle suffix range (bytes=-N), open-ended range (bytes=N-), and full range (bytes=N-M)
+    let start: number;
+    let end:   number;
+    if (!startStr && endStr) {
+      // bytes=-N: last N bytes
+      const suffix = parseInt(endStr, 10);
+      start = isNaN(suffix) ? 0 : Math.max(0, total - suffix);
+      end   = total - 1;
+    } else {
+      start = startStr ? parseInt(startStr, 10) : 0;
+      end   = endStr   ? parseInt(endStr,   10) : total - 1;
+    }
+    // Clamp and validate
+    if (isNaN(start) || isNaN(end) || start < 0 || start >= total || end < start) {
+      return new Response(null, {
+        status: 416,
+        headers: { "Content-Range": `bytes */${total}` },
+      });
+    }
+    end = Math.min(end, total - 1);
     const chunkSize = end - start + 1;
 
     const stream = fs.createReadStream(videoPath, { start, end });

@@ -41,41 +41,48 @@ export async function POST(req: Request) {
     await sheets.initializeSheet();
 
     const results: { rowIndex: number; topic: string; jobId?: string; template?: string }[] = [];
+    const errors:  { topic: string; error: string }[] = [];
 
     for (const topic of topics) {
-      const rowIndex = await sheets.addContent({ topic, style, voice });
+      try {
+        const rowIndex = await sheets.addContent({ topic, style, voice });
 
-      if (autoQueue) {
-        const renderVariant = rand(ALL_VARIANTS);
-        const hookStyle     = rand(ALL_HOOK_STYLES);
+        if (autoQueue) {
+          const renderVariant = rand(ALL_VARIANTS);
+          const hookStyle     = rand(ALL_HOOK_STYLES);
 
-        await upsertContentRow({ row_index: rowIndex, topic, style, voice });
+          await upsertContentRow({ row_index: rowIndex, topic, style, voice });
 
-        if (version === "v2") {
-          const job = await createJob(rowIndex, topic, "v2-ugc");
-          await enqueueRender({ rowIndex, template: "v2-ugc", topic, dbJobId: job.id, version: "v2", sheetName: "Video Gen", renderVariant, hookStyle });
-          await sheets.updateStatus(rowIndex, "Queued");
-          results.push({ rowIndex, topic, jobId: job.id, template: "v2-ugc" });
+          if (version === "v2") {
+            const job = await createJob(rowIndex, topic, "v2-ugc");
+            await enqueueRender({ rowIndex, template: "v2-ugc", topic, dbJobId: job.id, version: "v2", sheetName: "Video Gen", renderVariant, hookStyle });
+            await sheets.updateStatus(rowIndex, "Queued");
+            results.push({ rowIndex, topic, jobId: job.id, template: "v2-ugc" });
+          } else {
+            const recentTemplates = await getLastTemplatesForTopic(topic);
+            const template        = await RenderAgent.selectTemplate(topic, style, recentTemplates);
+            const job = await createJob(rowIndex, topic, template);
+            await enqueueRender({ rowIndex, template, topic, dbJobId: job.id, renderVariant, hookStyle });
+            await sheets.updateStatus(rowIndex, "Queued");
+            results.push({ rowIndex, topic, jobId: job.id, template });
+          }
         } else {
-          const recentTemplates = await getLastTemplatesForTopic(topic);
-          const template        = await RenderAgent.selectTemplate(topic, style, recentTemplates);
-          const job = await createJob(rowIndex, topic, template);
-          await enqueueRender({ rowIndex, template, topic, dbJobId: job.id, renderVariant, hookStyle });
-          await sheets.updateStatus(rowIndex, "Queued");
-          results.push({ rowIndex, topic, jobId: job.id, template });
+          results.push({ rowIndex, topic });
         }
-      } else {
-        results.push({ rowIndex, topic });
+      } catch (err) {
+        errors.push({ topic, error: err instanceof Error ? err.message : String(err) });
       }
     }
 
+    const hasErrors = errors.length > 0;
     return NextResponse.json({
-      success: true,
-      added:   topics.length,
-      queued:  autoQueue ? topics.length : 0,
+      success: !hasErrors || results.length > 0,
+      added:   results.length,
+      queued:  autoQueue ? results.length : 0,
       version,
       jobs:    results,
-    });
+      ...(hasErrors ? { errors } : {}),
+    }, { status: hasErrors && results.length === 0 ? 500 : 200 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
