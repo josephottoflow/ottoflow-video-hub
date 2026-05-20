@@ -8,7 +8,8 @@
 import { store, type LogEntry } from "@/lib/pipeline-store";
 import { rGetStatus, rGetLogs, rClearLogs } from "@/lib/pipeline-redis";
 
-export const dynamic = "force-dynamic";
+export const dynamic    = "force-dynamic";
+export const maxDuration = 300; // Vercel Pro max — extends SSE lifetime from 60s → 5min
 
 export async function DELETE() {
   try {

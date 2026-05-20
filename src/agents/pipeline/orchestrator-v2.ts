@@ -145,6 +145,8 @@ export class PipelineOrchestratorV2 {
       if (voicePath) {
         emitLog("V2-Orchestrator", "Voiceover ready", "success");
         try { fs.copyFileSync(voicePath, path.join(publicContent, "voiceover.mp3")); } catch { /* skip */ }
+      } else {
+        emitLog("V2-Orchestrator", "⚠️ Voiceover skipped — check ELEVENLABS_API_KEY. Video will be silent.", "warning");
       }
       setStatus("running", row.topic, 28);
 
@@ -182,7 +184,9 @@ export class PipelineOrchestratorV2 {
               try { fs.copyFileSync(imgPath, path.join(publicContent, destFile)); } catch { /* skip */ }
               imageUrlMap[scene.id] = `/content/${slug}/${destFile}`;
             }
-          } catch { /* skip — scene renders with black bg */ }
+          } catch (err) {
+            emitLog("V2-Orchestrator", `⚠️ Imagen3 failed for ${scene.id} — scene will use gradient background`, "warning");
+          }
         }));
       }
       setStatus("running", row.topic, 55);

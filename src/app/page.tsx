@@ -1456,7 +1456,7 @@ const SVC_LABELS: Record<string, string> = {
 
 function AgentsView() {
   const [svc, setSvc] = useState<Services | null>(null);
-  useEffect(() => { fetch("/api/status").then(r => r.json()).then(setSvc).catch(() => {}); }, []);
+  useEffect(() => { fetch("/api/status").then(r => r.ok ? r.json() : null).then(d => { if (d) setSvc(d); }).catch(() => {}); }, []);
 
   return (
     <div style={{ padding: "28px 32px" }}>

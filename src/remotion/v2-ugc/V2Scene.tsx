@@ -75,11 +75,14 @@ export const V2Scene: React.FC<V2SceneProps> = ({
             transformOrigin: "center center",
           }}
         >
-          {imageSrc && (
+          {imageSrc ? (
             <Img
               src={imageSrc}
               style={{ width: "100%", height: "100%", objectFit: "cover" }}
             />
+          ) : (
+            // Fallback gradient when no image or clip is available
+            <AbsoluteFill style={{ background: "linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%)" }} />
           )}
         </AbsoluteFill>
       )}

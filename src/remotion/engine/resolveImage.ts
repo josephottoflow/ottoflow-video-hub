@@ -6,7 +6,7 @@
  * at bundle-build time — new downloads after the bundle is cached would 404.
  */
 
-const NEXTJS_BASE = "http://localhost:3000";
+const NEXTJS_BASE = process.env.REMOTION_SERVER_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
 export function resolveImage(src: string): string {
   // Already an absolute URL — pass through unchanged

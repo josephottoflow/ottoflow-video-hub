@@ -74,13 +74,15 @@ export class RenderAgent {
     try {
       fs.mkdirSync(outputDir, { recursive: true });
 
-      // Save video-data.json so the preview player can read it
-      const contentDir = path.resolve("public", "content", productSlug);
-      fs.mkdirSync(contentDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(contentDir, "video-data.json"),
-        JSON.stringify(videoData, null, 2)
-      );
+      // Save video-data.json so the preview player can read it (local only — Vercel fs is read-only)
+      if (!process.env.VERCEL) {
+        const contentDir = path.resolve("public", "content", productSlug);
+        fs.mkdirSync(contentDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(contentDir, "video-data.json"),
+          JSON.stringify(videoData, null, 2)
+        );
+      }
 
       const outputPath = path.join(
         outputDir,

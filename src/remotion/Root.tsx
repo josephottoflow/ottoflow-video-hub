@@ -49,8 +49,9 @@ export const RemotionRoot: React.FC = () => {
           defaultProps={{ data: null }}
           calculateMetadata={async () => {
             try {
+              const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
               const res = await fetch(
-                "http://localhost:3000/api/video-data/" + productSlug
+                base + "/api/video-data/" + productSlug
               );
               if (res.ok) {
                 const data = (await res.json()) as ProductVideoData;
