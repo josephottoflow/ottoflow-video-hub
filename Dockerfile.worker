@@ -2,9 +2,10 @@ FROM node:20-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# System libraries required by Chrome Headless Shell and Puppeteer
+# System libraries for Remotion's Chrome Headless Shell + FFmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    ffmpeg \
     fonts-liberation \
     libglib2.0-0 \
     libnss3 \
@@ -34,7 +35,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install node deps (includes Puppeteer Chrome download)
 COPY package*.json tsconfig.json ./
 RUN npm ci
 
