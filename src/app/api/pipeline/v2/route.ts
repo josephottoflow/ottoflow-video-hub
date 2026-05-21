@@ -22,8 +22,9 @@ function randomHookStyle() { return HOOK_STYLES[Math.floor(Math.random() * HOOK_
 const SHEET_NAME = "Video Gen";
 
 export async function POST(req: NextRequest) {
-  const body           = await req.json().catch(() => ({})) as { rowIndex?: number };
-  const singleRowIndex = typeof body.rowIndex === "number" ? body.rowIndex : undefined;
+  const body           = await req.json().catch(() => ({})) as { rowIndex?: number; musicVibe?: string };
+  const singleRowIndex = typeof body.rowIndex  === "number" ? body.rowIndex  : undefined;
+  const musicVibe      = typeof body.musicVibe === "string" ? body.musicVibe : undefined;
 
   try {
     clearLogs();
@@ -46,8 +47,8 @@ export async function POST(req: NextRequest) {
       });
 
       const rv = randomVariant(); const hs = randomHookStyle();
-      const job = await createJob(row.rowIndex, row.topic, "v2-ugc", { version: "v2", renderVariant: rv, hookStyle: hs, sheetName: SHEET_NAME });
-      await enqueueRender({ rowIndex: row.rowIndex, template: "v2-ugc", topic: row.topic, dbJobId: job.id, version: "v2", sheetName: SHEET_NAME, renderVariant: rv, hookStyle: hs });
+      const job = await createJob(row.rowIndex, row.topic, "v2-ugc", { version: "v2", renderVariant: rv, hookStyle: hs, sheetName: SHEET_NAME, musicVibe });
+      await enqueueRender({ rowIndex: row.rowIndex, template: "v2-ugc", topic: row.topic, dbJobId: job.id, version: "v2", sheetName: SHEET_NAME, renderVariant: rv, hookStyle: hs, musicVibe });
       await sheets.updateStatus(row.rowIndex, "Queued");
 
       setStatus("running", row.topic, 10);
@@ -71,8 +72,8 @@ export async function POST(req: NextRequest) {
         });
 
         const rv = randomVariant(); const hs = randomHookStyle();
-        const job = await createJob(row.rowIndex, row.topic, "v2-ugc", { version: "v2", renderVariant: rv, hookStyle: hs, sheetName: SHEET_NAME });
-        await enqueueRender({ rowIndex: row.rowIndex, template: "v2-ugc", topic: row.topic, dbJobId: job.id, version: "v2", sheetName: SHEET_NAME, renderVariant: rv, hookStyle: hs });
+        const job = await createJob(row.rowIndex, row.topic, "v2-ugc", { version: "v2", renderVariant: rv, hookStyle: hs, sheetName: SHEET_NAME, musicVibe });
+        await enqueueRender({ rowIndex: row.rowIndex, template: "v2-ugc", topic: row.topic, dbJobId: job.id, version: "v2", sheetName: SHEET_NAME, renderVariant: rv, hookStyle: hs, musicVibe });
         await sheets.updateStatus(row.rowIndex, "Queued");
         jobs.push({ id: job.id, topic: row.topic });
         emitLog("V2-Orchestrator", `Queued V2: ${row.topic}`, "info");

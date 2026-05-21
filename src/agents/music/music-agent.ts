@@ -63,6 +63,15 @@ const MOOD_TAGS: Record<string, string> = {
   mysterious:   "ambient",
 };
 
+// User-selectable music vibes → Jamendo tags
+const VIBE_TAGS: Record<string, string> = {
+  "Energetic":   "energetic",
+  "Chill":       "relaxing",
+  "Cinematic":   "cinematic",
+  "Motivational":"uplifting",
+  "Corporate":   "corporate",
+};
+
 const STYLE_TAGS: Record<string, string> = {
   educational:       "ambient",
   motivational:      "uplifting",
@@ -94,17 +103,20 @@ export class MusicAgent {
   }
 
   async selectTrack(
-    row:     ContentRow,
-    design:  DesignSpec,
-    slug:    string,
-    tempDir?: string
+    row:          ContentRow,
+    design:       DesignSpec,
+    slug:         string,
+    tempDir?:     string,
+    vibeOverride?: string
   ): Promise<MusicSelection | null> {
     if (!MusicAgent.isAvailable()) {
       console.log("[music] No JAMENDO_CLIENT_ID — skipping music");
       return null;
     }
 
-    const tag   = this.resolveTag(row.topic, row.style, design.mood);
+    const tag   = vibeOverride && VIBE_TAGS[vibeOverride]
+      ? VIBE_TAGS[vibeOverride]
+      : this.resolveTag(row.topic, row.style, design.mood);
     const query = `${tag} ${this.topicKeyword(row.topic)}`.trim();
     console.log(`[music] Jamendo search: tag="${tag}"`);
 

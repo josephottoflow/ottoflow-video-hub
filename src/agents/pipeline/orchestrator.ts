@@ -21,8 +21,8 @@ import { BrandingAgent } from "../branding/branding-agent";
 import { MusicAgent } from "../music/music-agent";
 import { VoiceoverAgent } from "../voiceover/voiceover-agent";
 import { getConfig } from "../config/config";
-import { setStatus } from "../../lib/pipeline-store";
-import { getLastTemplatesForTopic } from "../../lib/db";
+import { setStatus, emitLog } from "../../lib/pipeline-store";
+import { getLastTemplatesForTopic, updateJobStatus } from "../../lib/db";
 import { uploadVideoToDrive } from "../../lib/google-drive";
 import { slugify } from "../../lib/slug-utils";
 import * as path from "path";
@@ -61,7 +61,9 @@ export class PipelineOrchestrator {
     rowIndex: number,
     templateOverride?: string,
     renderVariant?: RenderVariant,
-    hookStyle?: HookStyle
+    hookStyle?: HookStyle,
+    dbJobId?: string,
+    musicVibe?: string
   ): Promise<PipelineResult> {
     await this.sheets.initializeSheet();
     const all = await this.sheets.getAllContent();
@@ -94,7 +96,15 @@ export class PipelineOrchestrator {
       }
     }
 
-    return this.processContent(row, templateOverride);
+    // Emit script to live log and store in DB for UI visibility
+    if (row.script) {
+      emitLog("Script Writer", `Script: ${row.script}`, "info");
+      if (dbJobId) {
+        updateJobStatus(dbJobId, "processing", { script_text: row.script }).catch(() => {});
+      }
+    }
+
+    return this.processContent(row, templateOverride, musicVibe);
   }
 
   async processAll(): Promise<PipelineResult[]> {
@@ -144,7 +154,7 @@ export class PipelineOrchestrator {
     return results;
   }
 
-  async processContent(row: ContentRow, templateOverride?: string): Promise<PipelineResult> {
+  async processContent(row: ContentRow, templateOverride?: string, musicVibe?: string): Promise<PipelineResult> {
     const startedAt = new Date().toISOString();
     const startTime = Date.now();
     const slug      = slugify(row.topic || `content-${row.rowIndex}`);
@@ -179,7 +189,7 @@ export class PipelineOrchestrator {
       // ── 3. Select background music ───────────────────────────
       setStatus("running", row.topic, 30);
       console.log(`[${slug}] Selecting background music...`);
-      const musicTrack = await this.music.selectTrack(row, design, slug, tempDir);
+      const musicTrack = await this.music.selectTrack(row, design, slug, tempDir, musicVibe);
       if (musicTrack) {
         console.log(`[${slug}] Music: "${musicTrack.name}" by ${musicTrack.artist} (${musicTrack.duration}s)`);
       }
@@ -345,8 +355,7 @@ export class PipelineOrchestrator {
   // files downloaded after bundling. Using absolute localhost URLs lets Chrome fetch
   // directly from the running Next.js server, bypassing the stale bundle copy.
   private bgUrl(rel: string): string {
-    const port = process.env.PORT || "3000";
-    return `http://localhost:${port}/${rel}`;
+    return `http://localhost:3000/${rel}`;
   }
 
   private async fetchBackgrounds(

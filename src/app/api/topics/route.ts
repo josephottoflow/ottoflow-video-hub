@@ -27,8 +27,10 @@ export async function POST(req: Request) {
   try {
     const body      = await req.json();
     const topics    = (body.topics as string[] | undefined)?.map(t => t.trim()).filter(Boolean) ?? [];
-    const style     = (body.style  as string | undefined)?.trim() || "Educational";
-    const voice     = (body.voice  as string | undefined)?.trim() || "Female energetic";
+    const style     = (body.style     as string | undefined)?.trim() || "Educational";
+    const voice     = (body.voice     as string | undefined)?.trim() || "Female energetic";
+    const musicVibe      = (body.musicVibe      as string | undefined)?.trim() || undefined;
+    const variantOverride = (body.renderVariant as string | undefined)?.trim() || undefined;
     const autoQueue = body.autoQueue !== false;
     const version   = (body.version as string | undefined) === "v2" ? "v2" : "v1";
 
@@ -48,21 +50,21 @@ export async function POST(req: Request) {
         const rowIndex = await sheets.addContent({ topic, style, voice });
 
         if (autoQueue) {
-          const renderVariant = rand(ALL_VARIANTS);
+          const renderVariant = (variantOverride as RenderVariant | undefined) ?? rand(ALL_VARIANTS);
           const hookStyle     = rand(ALL_HOOK_STYLES);
 
           await upsertContentRow({ row_index: rowIndex, topic, style, voice });
 
           if (version === "v2") {
-            const job = await createJob(rowIndex, topic, "v2-ugc");
-            await enqueueRender({ rowIndex, template: "v2-ugc", topic, dbJobId: job.id, version: "v2", sheetName: "Video Gen", renderVariant, hookStyle });
+            const job = await createJob(rowIndex, topic, "v2-ugc", { version: "v2", renderVariant, hookStyle, sheetName: "Video Gen", musicVibe });
+            await enqueueRender({ rowIndex, template: "v2-ugc", topic, dbJobId: job.id, version: "v2", sheetName: "Video Gen", renderVariant, hookStyle, musicVibe });
             await sheets.updateStatus(rowIndex, "Queued");
             results.push({ rowIndex, topic, jobId: job.id, template: "v2-ugc" });
           } else {
             const recentTemplates = await getLastTemplatesForTopic(topic);
             const template        = await RenderAgent.selectTemplate(topic, style, recentTemplates);
-            const job = await createJob(rowIndex, topic, template);
-            await enqueueRender({ rowIndex, template, topic, dbJobId: job.id, renderVariant, hookStyle });
+            const job = await createJob(rowIndex, topic, template, { version: "v1", renderVariant, hookStyle, musicVibe });
+            await enqueueRender({ rowIndex, template, topic, dbJobId: job.id, renderVariant, hookStyle, musicVibe });
             await sheets.updateStatus(rowIndex, "Queued");
             results.push({ rowIndex, topic, jobId: job.id, template });
           }

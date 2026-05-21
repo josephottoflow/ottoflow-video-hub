@@ -21,7 +21,7 @@ type Tier   = "basic" | "advanced";
 
 interface LogEntry { id: number; ts: string; agent: string; message: string; level: string; }
 interface QueueRow { rowIndex: number; topic: string; style: string; status: string; avatarUrl?: string; }
-interface DbJob { id: string; topic: string; template: string; status: string; error?: string; output_link?: string; duration_ms?: number; started_at?: string; }
+interface DbJob { id: string; topic: string; template: string; status: string; error?: string; output_link?: string; duration_ms?: number; started_at?: string; progress?: number; }
 interface Services { anthropic: boolean; gemini: boolean; elevenlabs: boolean; pexels: boolean; telegram: boolean; sheets: boolean; n8n: boolean; ffmpeg: boolean; remotion: boolean; branding: boolean; jamendo: boolean; }
 
 // ─── Pipeline definition ──────────────────────────────────────
@@ -270,6 +270,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   const [startupInstalled, setStartupInstalled] = useState(false);
   const [workerLogs,       setWorkerLogs]       = useState<string[]>([]);
   const [showWorkerLogs,   setShowWorkerLogs]   = useState(false);
+  const [avgRenderMs,      setAvgRenderMs]      = useState<number | null>(null);
   const logEndRef   = useRef<HTMLDivElement>(null);
   const logPanelRef = useRef<HTMLDivElement>(null);
 
@@ -408,6 +409,13 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     return () => clearInterval(t);
   }, []);
 
+  // Fetch avg render time from /api/status once on mount
+  useEffect(() => {
+    fetch("/api/status").then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.avg_render_time_ms) setAvgRenderMs(d.avg_render_time_ms);
+    }).catch(() => {});
+  }, []);
+
   const runPipeline = async () => {
     setRunning(true); setLogs([]); setDoneAgents(new Set());
     const endpoint = tier === "advanced" ? "/api/pipeline/v2" : "/api/pipeline";
@@ -457,6 +465,16 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
       setPipeStatus("idle");
     } else {
       toast.error("Failed to kill jobs — check DB connection");
+    }
+  };
+
+  const killSingleJob = async (jobId: string) => {
+    const r = await fetch(`/api/jobs/${jobId}`, { method: "DELETE" }).catch(() => null);
+    if (r?.ok) {
+      setActiveJobs(prev => prev.filter(j => j.id !== jobId));
+      toast.success("Job killed");
+    } else {
+      toast.error("Failed to kill job");
     }
   };
 
@@ -581,11 +599,12 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {[
-            { label: "Total",   val: stats.total,   color: "var(--text-secondary)" },
-            { label: "Pending", val: stats.pending, color: "#f59e0b" },
-            { label: "Active",  val: stats.active,  color: "#a78bfa" },
-            { label: "Done",    val: stats.done,    color: "#10b981" },
-            { label: "Error",   val: stats.error,   color: "#f43f5e" },
+            { label: "Total",   val: String(stats.total),   color: "var(--text-secondary)" },
+            { label: "Pending", val: String(stats.pending), color: "#f59e0b" },
+            { label: "Active",  val: String(stats.active),  color: "#a78bfa" },
+            { label: "Done",    val: String(stats.done),    color: "#10b981" },
+            { label: "Error",   val: String(stats.error),   color: "#f43f5e" },
+            ...(avgRenderMs ? [{ label: "Avg", val: `~${Math.round(avgRenderMs / 60000)}m`, color: "var(--text-muted)" }] : []),
           ].map(({ label, val, color }) => (
             <div key={label} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 7, background: "var(--bg-elevated)", border: "1px solid var(--border)" }}>
               <span style={{ fontSize: 13, fontWeight: 800, color }}>{val}</span>
@@ -899,7 +918,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
               {activeJobs.map(job => {
                 const startedAt = job.started_at ? (() => { const d = new Date(job.started_at!); return isNaN(d.getTime()) ? null : d; })() : null;
                 const minAgo    = startedAt ? Math.floor((Date.now() - startedAt.getTime()) / 60000) : 0;
-                const isStuck   = job.status === "processing" && minAgo >= 5;
+                const isStuck   = job.status === "processing" && minAgo >= 10;
                 const color     = isStuck ? "#f43f5e" : "#a78bfa";
                 const bg        = isStuck ? "rgba(244,63,94,0.08)"   : "rgba(99,102,241,0.08)";
                 const border    = isStuck ? "rgba(244,63,94,0.25)"   : "rgba(99,102,241,0.2)";
@@ -913,8 +932,8 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                       {startedAt ? `${minAgo}m ago` : job.template}
                     </span>
                     <button
-                      onClick={killJobs}
-                      title="Kill this render and reset queue"
+                      onClick={() => killSingleJob(job.id)}
+                      title="Kill this render only"
                       style={{
                         padding: "2px 9px", borderRadius: 5, flexShrink: 0,
                         border: "1px solid rgba(244,63,94,0.35)",
@@ -1051,7 +1070,11 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                           </>
                         ) : isProcessing ? (
                           <button
-                            onClick={killJobs}
+                            onClick={() => {
+                              const activeJob = activeJobs.find(j => j.topic.toLowerCase().trim() === row.topic.toLowerCase().trim());
+                              if (activeJob) killSingleJob(activeJob.id);
+                              else killJobs();
+                            }}
                             title="Kill this render"
                             style={{
                               display: "flex", alignItems: "center", gap: 3,
@@ -1694,6 +1717,8 @@ function ReviewView() {
 
 // ─── Own Topic ────────────────────────────────────────────────
 
+const MUSIC_VIBES = ["Auto", "Energetic", "Chill", "Cinematic", "Motivational", "Corporate"];
+
 const OWN_TOPIC_TEMPLATES = [
   { id: "listicle",    label: "Top N List",   Icon: List,         desc: "Numbered tips & rankings — highest shareability" },
   { id: "stats-story", label: "Stats Story",  Icon: TrendingUp,   desc: "Bold data-driven narrative with big numbers" },
@@ -1741,30 +1766,44 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
   const [style,      setStyle]      = useState("Educational");
   const [template,   setTemplate]   = useState("listicle");
   const [generating, setGenerating] = useState(false);
+  const [musicVibe,  setMusicVibe]  = useState("Auto");
 
   // Batch tab
   const [batchText,    setBatchText]    = useState("");
   const [batchStyle,   setBatchStyle]   = useState("Educational");
   const [batchVoice,   setBatchVoice]   = useState("Female energetic");
+  const [batchVibe,    setBatchVibe]    = useState("Auto");
   const [batchLoading, setBatchLoading] = useState(false);
 
   // AI tab
-  const [niche,       setNiche]       = useState("");
-  const [aiCount,     setAiCount]     = useState(15);
-  const [aiLoading,   setAiLoading]   = useState(false);
-  const [suggestions, setSuggestions] = useState<TopicSuggestion[]>([]);
-  const [selected,    setSelected]    = useState<Set<number>>(new Set());
-  const [queuing,     setQueuing]     = useState(false);
+  const [niche,            setNiche]            = useState("");
+  const [aiCount,          setAiCount]          = useState(15);
+  const [aiLoading,        setAiLoading]        = useState(false);
+  const [suggestions,      setSuggestions]      = useState<TopicSuggestion[]>([]);
+  const [selected,         setSelected]         = useState<Set<number>>(new Set());
+  const [variantOverrides, setVariantOverrides] = useState<Record<number, string>>({});
+  const [aiVibe,           setAiVibe]           = useState("Auto");
+  const [queuing,          setQueuing]          = useState(false);
+
+  // Restore niche from localStorage
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem("ottoflow-niche") : null;
+    if (saved) setNiche(saved);
+  }, []);
+  useEffect(() => {
+    if (typeof window !== "undefined" && niche) localStorage.setItem("ottoflow-niche", niche);
+  }, [niche]);
 
   const handleSingle = async () => {
     const t = topic.trim();
     if (!t) { toast.error("Enter a topic first"); return; }
     setGenerating(true);
     try {
+      const vibeParam = musicVibe !== "Auto" ? musicVibe : undefined;
       if (tier === "advanced") {
         const res = await fetch("/api/topics", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ topics: [t], style, version: "v2", autoQueue: true }),
+          body: JSON.stringify({ topics: [t], style, version: "v2", autoQueue: true, musicVibe: vibeParam }),
         });
         if (!res.ok) throw new Error("Failed to queue V2 topic");
         toast.success(`Queued V2: "${t}" — watch progress in Command Center`);
@@ -1777,7 +1816,7 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
         const { rowIndex } = await addRes.json();
         const renderRes = await fetch("/api/pipeline", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rowIndex, template }),
+          body: JSON.stringify({ rowIndex, template, musicVibe: vibeParam }),
         });
         if (!renderRes.ok) throw new Error("Failed to queue render job");
         toast.success(`Queued: "${t}" — watch progress in Command Center`);
@@ -1791,13 +1830,17 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
   };
 
   const handleBatch = async () => {
-    const lines = batchText.split("\n").map(l => l.trim()).filter(Boolean);
-    if (lines.length === 0) { toast.error("Enter at least one topic"); return; }
+    const rawLines = batchText.split("\n").map(l => l.trim()).filter(Boolean);
+    if (rawLines.length === 0) { toast.error("Enter at least one topic"); return; }
+    const lines = [...new Set(rawLines)];
+    const dupeCount = rawLines.length - lines.length;
+    if (dupeCount > 0) toast.info(`${dupeCount} duplicate(s) removed`);
     setBatchLoading(true);
+    const vibeParam = batchVibe !== "Auto" ? batchVibe : undefined;
     try {
       const res = await fetch("/api/topics", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topics: lines, style: batchStyle, voice: batchVoice, autoQueue: true, version: tier === "advanced" ? "v2" : "v1" }),
+        body: JSON.stringify({ topics: lines, style: batchStyle, voice: batchVoice, autoQueue: true, version: tier === "advanced" ? "v2" : "v1", musicVibe: vibeParam }),
       });
       if (!res.ok) throw new Error("Failed to queue topics");
       const data = await res.json();
@@ -1832,18 +1875,34 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
   };
 
   const handleQueueSelected = async () => {
-    const picks = [...selected].map(i => suggestions[i]).filter(Boolean);
+    const picks = [...selected].map(i => ({ idx: i, s: suggestions[i] })).filter(x => x.s);
     if (picks.length === 0) { toast.error("Select at least one topic"); return; }
     setQueuing(true);
+    const vibeParam = aiVibe !== "Auto" ? aiVibe : undefined;
+    const hasOverrides = picks.some(({ idx }) => variantOverrides[idx]);
     try {
-      const res = await fetch("/api/topics", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topics: picks.map(s => s.topic), style: picks[0]?.style || "Educational", autoQueue: true, version: tier === "advanced" ? "v2" : "v1" }),
-      });
-      if (!res.ok) throw new Error("Failed to queue topics");
-      const data = await res.json();
-      toast.success(`Queued ${data.queued} topic(s) — watch in Command Center`);
-      setSuggestions([]); setSelected(new Set());
+      if (hasOverrides) {
+        // Send individually so each can carry its own renderVariant
+        let queued = 0;
+        for (const { idx, s } of picks) {
+          const rv = variantOverrides[idx] || undefined;
+          const res = await fetch("/api/topics", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ topics: [s.topic], style: s.style || "Educational", autoQueue: true, version: tier === "advanced" ? "v2" : "v1", musicVibe: vibeParam, renderVariant: rv }),
+          });
+          if (res.ok) { const d = await res.json(); queued += d.queued ?? 0; }
+        }
+        toast.success(`Queued ${queued} topic(s) — watch in Command Center`);
+      } else {
+        const res = await fetch("/api/topics", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topics: picks.map(({ s }) => s.topic), style: picks[0]?.s.style || "Educational", autoQueue: true, version: tier === "advanced" ? "v2" : "v1", musicVibe: vibeParam }),
+        });
+        if (!res.ok) throw new Error("Failed to queue topics");
+        const data = await res.json();
+        toast.success(`Queued ${data.queued} topic(s) — watch in Command Center`);
+      }
+      setSuggestions([]); setSelected(new Set()); setVariantOverrides({});
       onGenerate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
@@ -1900,6 +1959,12 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
               <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>Style</label>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {OWN_TOPIC_STYLES.map(s => <button key={s} onClick={() => setStyle(s)} style={stylePillStyle(style === s)}>{s}</button>)}
+              </div>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>Music Vibe</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {MUSIC_VIBES.map(v => <button key={v} onClick={() => setMusicVibe(v)} style={stylePillStyle(musicVibe === v)}>{v}</button>)}
               </div>
             </div>
           </div>
@@ -1979,6 +2044,12 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
                 </div>
               </div>
             </div>
+            <div style={{ marginTop: 16 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>Music Vibe</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {MUSIC_VIBES.map(v => <button key={v} onClick={() => setBatchVibe(v)} style={stylePillStyle(batchVibe === v)}>{v}</button>)}
+              </div>
+            </div>
           </div>
 
           <button onClick={handleBatch} disabled={batchLoading || !batchText.trim()} style={primaryBtn(batchLoading || !batchText.trim())}>
@@ -2017,6 +2088,13 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
 
           {suggestions.length > 0 && (
             <>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>Music Vibe</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {MUSIC_VIBES.map(v => <button key={v} onClick={() => setAiVibe(v)} style={stylePillStyle(aiVibe === v)}>{v}</button>)}
+                </div>
+              </div>
+
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                 <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{suggestions.length} suggestions</span>
                 <div style={{ display: "flex", gap: 8 }}>
@@ -2043,9 +2121,22 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
                         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", marginBottom: 3, lineHeight: 1.4 }}>{s.topic}</div>
                         <div style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>{s.hookPreview}</div>
                       </div>
-                      <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-                        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 5, padding: "2px 7px" }}>{s.style}</span>
-                        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 5, padding: "2px 7px" }}>{s.angle}</span>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                        <div style={{ display: "flex", gap: 5 }}>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 5, padding: "2px 7px" }}>{s.style}</span>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 5, padding: "2px 7px" }}>{s.angle}</span>
+                        </div>
+                        <select
+                          value={variantOverrides[i] ?? ""}
+                          onChange={e => setVariantOverrides(prev => ({ ...prev, [i]: e.target.value }))}
+                          style={{ fontSize: 10, color: "var(--text-muted)", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 5, padding: "2px 6px", cursor: "pointer", outline: "none" }}
+                        >
+                          <option value="">Story arc: Random</option>
+                          <option value="problem-first">Problem-first</option>
+                          <option value="stat-first">Stat-first</option>
+                          <option value="story-arc">Story arc</option>
+                          <option value="myth-bust">Myth-bust</option>
+                        </select>
                       </div>
                     </motion.div>
                   );

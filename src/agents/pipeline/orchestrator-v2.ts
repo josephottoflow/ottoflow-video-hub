@@ -34,7 +34,7 @@ import { getConfig }           from "../config/config";
 import { slugify }             from "../../lib/slug-utils";
 import { setStatus, emitLog }  from "../../lib/pipeline-store";
 import { uploadFileToR2, isR2Available } from "../../lib/r2";
-import { updateJobStatus }     from "../../lib/db";
+import { updateJobStatus, saveStoryboard } from "../../lib/db";
 import type { PipelineResult } from "./orchestrator";
 import type { V2UGCData }      from "../../remotion/v2-ugc/types";
 import type { DesignSpec }     from "../design/design-agent";
@@ -73,7 +73,8 @@ export class PipelineOrchestratorV2 {
     rowIndex:      number,
     renderVariant?: RenderVariant,
     hookStyle?:     HookStyle,
-    dbJobId?:       string
+    dbJobId?:       string,
+    musicVibe?:     string
   ): Promise<PipelineResult> {
     await this.sheets.initializeSheet();
     const all = await this.sheets.getAllContent();
@@ -130,6 +131,20 @@ export class PipelineOrchestratorV2 {
       emitLog("V2-Orchestrator", `Storyboard: ${sb.scenes.length} scenes, ${(sb.totalFrames / 30).toFixed(1)}s, style=${sb.visualStyle}`, "success");
       setStatus("running", row.topic, 15);
 
+      if (dbJobId) {
+        saveStoryboard(dbJobId, {
+          topic:       sb.topic,
+          visualStyle: sb.visualStyle,
+          musicMood:   sb.musicMood,
+          totalFrames: sb.totalFrames,
+          fullScript:  sb.fullScript,
+          scenes:      sb.scenes,
+        }).catch(() => {}); // non-fatal
+        // Store script text and emit to live log for UI visibility
+        updateJobStatus(dbJobId, "processing", { script_text: sb.fullScript }).catch(() => {});
+      }
+      emitLog("Script Writer", `Script: ${sb.fullScript}`, "info");
+
       // Write script back to sheet for record-keeping
       const sheetScript = sb.fullScript;
       const hookLines   = sb.scenes.filter(s => s.beat === "hook").map(s => s.caption);
@@ -142,18 +157,8 @@ export class PipelineOrchestratorV2 {
 
       emitLog("V2-Orchestrator", "Generating voiceover...", "info");
       const voicePath = await this.voiceover.generate(sb.fullScript, tempDir, row.voice) ?? undefined;
-      let voiceoverUrl: string | undefined;
       if (voicePath) {
         emitLog("V2-Orchestrator", "Voiceover ready", "success");
-        if (isR2Available()) {
-          try {
-            voiceoverUrl = await uploadFileToR2(`voiceover/${slug}/voiceover.mp3`, voicePath, "audio/mpeg");
-          } catch { /* fall through to local copy */ }
-        }
-        if (!voiceoverUrl) {
-          try { fs.copyFileSync(voicePath, path.join(publicContent, "voiceover.mp3")); } catch { /* skip */ }
-          voiceoverUrl = `/content/${slug}/voiceover.mp3`;
-        }
       } else {
         emitLog("V2-Orchestrator", "⚠️ Voiceover skipped — check ELEVENLABS_API_KEY. Video will be silent.", "warning");
       }
@@ -251,7 +256,7 @@ export class PipelineOrchestratorV2 {
         fontWeight: "bold", textEffect: "shadow", rationale: `V2 ${sb.visualStyle}`,
         brandColors: { primary: "#ffffff", secondary: "#cccccc", accent: "#FFE500", background: "#000000", text: "#ffffff" },
       };
-      const musicTrack = await this.music.selectTrack(row, designStub, slug, tempDir).catch(() => null);
+      const musicTrack = await this.music.selectTrack(row, designStub, slug, tempDir, musicVibe).catch(() => null);
       setStatus("running", row.topic, 62);
 
       // ── Step 6: Assemble storyboard data for Remotion ─────────────────────
@@ -265,9 +270,9 @@ export class PipelineOrchestratorV2 {
       };
 
       const videoData: V2UGCData = {
-        topic:       row.topic,
-        storyboard:  storyboardData,
-        voiceoverUrl,
+        topic:      row.topic,
+        storyboard: storyboardData,
+        // voiceoverUrl omitted — Remotion renders silent visuals; FFmpeg mixes all audio
       };
 
       emitLog("V2-Orchestrator", "Rendering V2 composition...", "info");
@@ -323,23 +328,26 @@ export class PipelineOrchestratorV2 {
       const cbKey = dbJobId ? dbJobId.slice(0, 16) : slug.slice(0, 55);
       const approval = await this.approvalBot.sendVideoForApproval(finalVideo, row.topic, cbKey);
 
-      if (approval.decision === "approved") {
-        await this.sheets.markComplete(rowIndex, finalVideo);
+      if (approval.decision === "approved" || approval.decision === "timeout") {
+        // Auto-approve on timeout — video is already rendered and good to go.
+        // Creator can review in Quality Review tab; rejecting requires a separate re-queue.
+        await this.sheets.markComplete(rowIndex, outputLink);
         setStatus("done", row.topic, 100);
-        emitLog("V2-Orchestrator", `Approved and saved: ${row.topic}`, "success");
+        if (approval.decision === "timeout") {
+          emitLog("V2-Orchestrator", `Telegram timeout — auto-approved: ${row.topic}`, "success");
+        } else {
+          emitLog("V2-Orchestrator", `Approved: ${row.topic}`, "success");
+        }
       } else if (approval.decision === "rejected") {
         await this.sheets.updateStatus(rowIndex, "Rejected");
         setStatus("error");
         emitLog("V2-Orchestrator", `Rejected: ${row.topic}`, "warning");
-      } else {
-        await this.sheets.updateStatus(rowIndex, "Approval");
-        emitLog("V2-Orchestrator", `Approval timed out: ${row.topic} — review manually`, "warning");
       }
 
       return {
         topic:      row.topic,
         slug,
-        success:    approval.decision === "approved",
+        success:    approval.decision !== "rejected",
         outputDir:  outDir,
         outputLink,
         timing: {

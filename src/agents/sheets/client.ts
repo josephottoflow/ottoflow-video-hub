@@ -257,7 +257,9 @@ export class SheetsClient {
       const res = await this.sheets.spreadsheets.values.get({
         spreadsheetId: this.spreadsheetId, range,
       });
-      if (res.data.values?.length) return;
+      const existing = res.data.values?.[0] ?? [];
+      // Write header if missing OR if it's shorter than the full schema (e.g. missing Avatar URL)
+      if (existing.length >= HEADER_ROW.length) return;
     } catch { /* sheet may not exist yet */ }
 
     await this.sheets.spreadsheets.values.update({
@@ -343,7 +345,7 @@ export class SheetsClient {
   async clearAllContent(): Promise<void> {
     await this.sheets.spreadsheets.values.clear({
       spreadsheetId: this.spreadsheetId,
-      range: `${this.sheetName}!A2:T500`,
+      range: `${this.sheetName}!A2:U500`,
     });
   }
 

@@ -18,9 +18,9 @@ import { Worker, Job } from "bullmq";
 import { redisConnection, RENDER_QUEUE, RenderJobData } from "../lib/queue";
 import { PipelineOrchestrator }   from "../agents/pipeline/orchestrator";
 import { PipelineOrchestratorV2 } from "../agents/pipeline/orchestrator-v2";
-import { updateJobStatus, markStuckJobsError, getJob, touchWorkerHeartbeat, runMigrations } from "../lib/db";
+import { updateJobStatus, markStuckJobsError, getJob, touchWorkerHeartbeat, runMigrations, updateJobProgress } from "../lib/db";
 import { ensureBrowser } from "@remotion/renderer";
-import { emitLog, inferAgent, inferLevel, setStatus, clearLogs } from "../lib/pipeline-store";
+import { emitLog, inferAgent, inferLevel, setStatus, clearLogs, store } from "../lib/pipeline-store";
 
 const CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
 
@@ -28,7 +28,7 @@ const CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
 // Falls back silently if Next.js dev server already holds the port.
 function startStaticServer() {
   const publicDir = path.resolve("public");
-  const port      = parseInt(process.env.PORT || "3000", 10);
+  const port      = 3000;
   const MIME: Record<string, string> = {
     ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
@@ -72,10 +72,10 @@ async function checkRedis(): Promise<void> {
 }
 
 async function processJob(job: Job<RenderJobData>): Promise<void> {
-  const { rowIndex, template, topic, dbJobId, version, renderVariant, hookStyle } = job.data;
+  const { rowIndex, template, topic, dbJobId, version, renderVariant, hookStyle, musicVibe } = job.data;
 
   console.log(`\n[worker] ── Job ${dbJobId} ──`);
-  console.log(`[worker] Topic: ${topic} | Template: ${template} | Version: ${version ?? "v1"} | Variant: ${renderVariant ?? "default"} | Row: ${rowIndex}`);
+  console.log(`[worker] Topic: ${topic} | Template: ${template} | Version: ${version ?? "v1"} | Variant: ${renderVariant ?? "default"} | Row: ${rowIndex}${musicVibe ? ` | Vibe: ${musicVibe}` : ""}`);
 
   // Check if this job was killed via the UI before we start any work
   try {
@@ -94,13 +94,21 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
     console.warn("[worker] Could not update job status to processing:", err instanceof Error ? err.message : err);
   }
 
+  // Sync pipeline-store progress → BullMQ + DB every 5s so UI shows real-time %
+  const progressInterval = setInterval(() => {
+    const pct = store.progress;
+    job.updateProgress(pct).catch(() => {});
+    updateJobProgress(dbJobId, pct).catch(() => {});
+  }, 5_000);
+
   const startTime = Date.now();
   let result;
   try {
     result = version === "v2"
-      ? await new PipelineOrchestratorV2().processSingleByRowIndex(rowIndex, renderVariant as any, hookStyle as any, dbJobId)
-      : await new PipelineOrchestrator().processSingleByRowIndex(rowIndex, template, renderVariant as any, hookStyle as any);
+      ? await new PipelineOrchestratorV2().processSingleByRowIndex(rowIndex, renderVariant as any, hookStyle as any, dbJobId, musicVibe)
+      : await new PipelineOrchestrator().processSingleByRowIndex(rowIndex, template, renderVariant as any, hookStyle as any, dbJobId, musicVibe);
   } catch (err) {
+    clearInterval(progressInterval);
     const message = err instanceof Error ? err.message : "Unknown pipeline error";
     const durationMs = Date.now() - startTime;
     setStatus("error");
@@ -112,6 +120,7 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
     throw new Error(message);
   }
 
+  clearInterval(progressInterval);
   const durationMs = Date.now() - startTime;
 
   if (result.success) {
@@ -173,7 +182,7 @@ async function startup() {
 
   // Clear any jobs that were left in "processing" from a previous crash
   try {
-    const cleaned = await markStuckJobsError(15 * 60 * 1000);
+    const cleaned = await markStuckJobsError(10 * 60 * 1000);
     if (cleaned > 0) console.log(`[worker] Marked ${cleaned} stuck job(s) as error on startup`);
   } catch (err) {
     console.warn("[worker] Could not clean stuck jobs (DB may be unreachable):", err instanceof Error ? err.message : err);

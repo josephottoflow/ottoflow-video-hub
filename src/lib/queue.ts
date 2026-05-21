@@ -27,6 +27,8 @@ export interface RenderJobData {
   sheetName?:     string;
   renderVariant?: RenderVariant;
   hookStyle?:     string;
+  musicVibe?:     string;
+  scheduledAt?:   number; // ms epoch — if set, job is delayed until this time
 }
 
 export const renderQueue = new Queue<RenderJobData>(RENDER_QUEUE, {
@@ -40,6 +42,9 @@ export const renderQueue = new Queue<RenderJobData>(RENDER_QUEUE, {
 });
 
 export async function enqueueRender(data: RenderJobData): Promise<string> {
-  const job = await renderQueue.add("render-video", data, { jobId: data.dbJobId });
+  const delay = data.scheduledAt && data.scheduledAt > Date.now()
+    ? data.scheduledAt - Date.now()
+    : undefined;
+  const job = await renderQueue.add("render-video", data, { jobId: data.dbJobId, ...(delay ? { delay } : {}) });
   return job.id!;
 }

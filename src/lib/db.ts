@@ -35,6 +35,12 @@ export interface DbJob {
   hook_style?:    string;
   visual_style?:  string;
   sheet_name?:    string;
+  music_vibe?:    string;
+  music_track?:   string;
+  script_text?:   string;
+  quality_score?: number;
+  needs_review?:  boolean;
+  progress?:      number;
   error?:         string;
   output_path?:   string;
   output_link?:   string;
@@ -115,6 +121,12 @@ export async function runMigrations(): Promise<void> {
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS hook_style     TEXT;
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS visual_style   TEXT;
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS sheet_name     TEXT;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS music_vibe     TEXT;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS music_track    TEXT;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS script_text    TEXT;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS quality_score  FLOAT;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS needs_review   BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress       INT NOT NULL DEFAULT 0;
 
     -- Content rows synced from Google Sheets
     CREATE TABLE IF NOT EXISTS content_rows (
@@ -179,13 +191,14 @@ export async function createJob(
     renderVariant?: string;
     hookStyle?:     string;
     sheetName?:     string;
+    musicVibe?:     string;
   } = {}
 ): Promise<DbJob> {
   const { rows } = await getDb().query<DbJob>(
-    `INSERT INTO jobs (row_index, topic, template, version, render_variant, hook_style, sheet_name)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO jobs (row_index, topic, template, version, render_variant, hook_style, sheet_name, music_vibe)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING *`,
-    [rowIndex, topic, template, meta.version ?? "v1", meta.renderVariant ?? null, meta.hookStyle ?? null, meta.sheetName ?? null]
+    [rowIndex, topic, template, meta.version ?? "v1", meta.renderVariant ?? null, meta.hookStyle ?? null, meta.sheetName ?? null, meta.musicVibe ?? null]
   );
   return rows[0];
 }
@@ -195,7 +208,8 @@ export async function updateJobStatus(
   status: JobStatus,
   fields: Partial<Pick<DbJob,
     "error" | "output_path" | "output_link" | "duration_ms" | "bull_job_id" |
-    "started_at" | "completed_at" | "visual_style"
+    "started_at" | "completed_at" | "visual_style" | "script_text" |
+    "music_track" | "progress" | "quality_score" | "needs_review"
   >> = {}
 ): Promise<void> {
   if (status === "processing" && !fields.started_at)   fields.started_at   = new Date();
@@ -277,6 +291,35 @@ export async function getLastTemplatesForTopic(topic: string, limit = 3): Promis
     );
     return rows.map(r => r.template);
   } catch { return []; }
+}
+
+export async function killJob(id: string): Promise<boolean> {
+  const result = await getDb().query(
+    `UPDATE jobs
+     SET status = 'error', error = 'Killed by user', completed_at = NOW()
+     WHERE id = $1 AND status IN ('pending', 'processing')
+     RETURNING id`,
+    [id]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function updateJobProgress(id: string, progress: number): Promise<void> {
+  try {
+    await getDb().query(`UPDATE jobs SET progress = $2 WHERE id = $1`, [id, progress]);
+  } catch { /* non-fatal */ }
+}
+
+export async function getAvgRenderTimeMs(): Promise<number | null> {
+  try {
+    const { rows } = await getDb().query<{ avg: string }>(
+      `SELECT AVG(duration_ms)::bigint AS avg FROM jobs
+       WHERE status = 'done' AND duration_ms IS NOT NULL AND duration_ms > 0
+         AND created_at > NOW() - INTERVAL '7 days'`
+    );
+    const v = parseInt(rows[0]?.avg ?? "", 10);
+    return isNaN(v) ? null : v;
+  } catch { return null; }
 }
 
 export async function hasProcessingJob(withinMs = 10 * 60 * 1000): Promise<boolean> {

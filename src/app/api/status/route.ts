@@ -6,6 +6,7 @@
 import { NextResponse } from "next/server";
 import * as fs from "fs";
 import { execSync } from "child_process";
+import { getAvgRenderTimeMs } from "@/lib/db";
 
 function checkFfmpeg(): boolean {
   try {
@@ -27,18 +28,20 @@ export async function GET() {
   const oauthToken    = fs.existsSync(".oauth-token.json");
   const serviceAcct   = !!(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim());
   const sheetsId      = !!process.env.GOOGLE_SPREADSHEET_ID;
+  const avgRenderMs   = await getAvgRenderTimeMs().catch(() => null);
 
   return NextResponse.json({
-    anthropic:   !!process.env.ANTHROPIC_API_KEY,
-    gemini:      !!process.env.GOOGLE_API_KEY,
-    elevenlabs:  !!process.env.ELEVENLABS_API_KEY,
-    pexels:      !!process.env.PEXELS_API_KEY,
-    telegram:    !!process.env.TELEGRAM_BOT_TOKEN,
-    sheets:      sheetsId && (oauthToken || serviceAcct),
-    n8n:         !!process.env.N8N_API_KEY,
-    ffmpeg:      checkFfmpeg(),
-    remotion:    true,
-    branding:    true,
-    jamendo:     true,
+    anthropic:        !!process.env.ANTHROPIC_API_KEY,
+    gemini:           !!process.env.GOOGLE_API_KEY,
+    elevenlabs:       !!process.env.ELEVENLABS_API_KEY,
+    pexels:           !!process.env.PEXELS_API_KEY,
+    telegram:         !!process.env.TELEGRAM_BOT_TOKEN,
+    sheets:           sheetsId && (oauthToken || serviceAcct),
+    n8n:              !!process.env.N8N_API_KEY,
+    ffmpeg:           checkFfmpeg(),
+    remotion:         true,
+    branding:         true,
+    jamendo:          true,
+    avg_render_time_ms: avgRenderMs,
   });
 }
