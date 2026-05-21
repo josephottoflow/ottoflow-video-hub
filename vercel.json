@@ -2,8 +2,7 @@
   "framework": "nextjs",
   "regions": ["sin1"],
   "functions": {
-    "src/app/api/pipeline-events/route.ts": { "maxDuration": 60 },
-    "src/app/api/pipeline/route.ts":        { "maxDuration": 30 },
-    "src/app/api/pipeline/v2/route.ts":     { "maxDuration": 30 }
+    "src/app/api/pipeline/route.ts":    { "maxDuration": 30 },
+    "src/app/api/pipeline/v2/route.ts": { "maxDuration": 30 }
   }
 }

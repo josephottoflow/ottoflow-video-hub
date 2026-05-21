@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
         hook_a: row.hookA, hook_b: row.hookB, hook_c: row.hookC, script: row.script,
       });
 
-      const job = await createJob(row.rowIndex, row.topic, template);
+      const job = await createJob(row.rowIndex, row.topic, template, { version: "v1", renderVariant, hookStyle });
       await enqueueRender({ rowIndex: row.rowIndex, template, topic: row.topic, dbJobId: job.id, renderVariant, hookStyle });
       await sheets.updateStatus(row.rowIndex, "Queued");
 
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
           hook_a: row.hookA, hook_b: row.hookB, hook_c: row.hookC, script: row.script,
         });
 
-        const job = await createJob(row.rowIndex, row.topic, template);
+        const job = await createJob(row.rowIndex, row.topic, template, { version: "v1", renderVariant, hookStyle });
         await enqueueRender({ rowIndex: row.rowIndex, template, topic: row.topic, dbJobId: job.id, renderVariant, hookStyle });
         await sheets.updateStatus(row.rowIndex, "Queued");
         jobs.push({ id: job.id, topic: row.topic, template, renderVariant });

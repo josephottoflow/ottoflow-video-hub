@@ -45,8 +45,9 @@ export async function POST(req: NextRequest) {
         hook_a: row.hookA, hook_b: row.hookB, hook_c: row.hookC, script: row.script,
       });
 
-      const job = await createJob(row.rowIndex, row.topic, "v2-ugc");
-      await enqueueRender({ rowIndex: row.rowIndex, template: "v2-ugc", topic: row.topic, dbJobId: job.id, version: "v2", sheetName: SHEET_NAME, renderVariant: randomVariant(), hookStyle: randomHookStyle() });
+      const rv = randomVariant(); const hs = randomHookStyle();
+      const job = await createJob(row.rowIndex, row.topic, "v2-ugc", { version: "v2", renderVariant: rv, hookStyle: hs, sheetName: SHEET_NAME });
+      await enqueueRender({ rowIndex: row.rowIndex, template: "v2-ugc", topic: row.topic, dbJobId: job.id, version: "v2", sheetName: SHEET_NAME, renderVariant: rv, hookStyle: hs });
       await sheets.updateStatus(row.rowIndex, "Queued");
 
       setStatus("running", row.topic, 10);
@@ -69,8 +70,9 @@ export async function POST(req: NextRequest) {
           hook_a: row.hookA, hook_b: row.hookB, hook_c: row.hookC, script: row.script,
         });
 
-        const job = await createJob(row.rowIndex, row.topic, "v2-ugc");
-        await enqueueRender({ rowIndex: row.rowIndex, template: "v2-ugc", topic: row.topic, dbJobId: job.id, version: "v2", sheetName: SHEET_NAME, renderVariant: randomVariant(), hookStyle: randomHookStyle() });
+        const rv = randomVariant(); const hs = randomHookStyle();
+        const job = await createJob(row.rowIndex, row.topic, "v2-ugc", { version: "v2", renderVariant: rv, hookStyle: hs, sheetName: SHEET_NAME });
+        await enqueueRender({ rowIndex: row.rowIndex, template: "v2-ugc", topic: row.topic, dbJobId: job.id, version: "v2", sheetName: SHEET_NAME, renderVariant: rv, hookStyle: hs });
         await sheets.updateStatus(row.rowIndex, "Queued");
         jobs.push({ id: job.id, topic: row.topic });
         emitLog("V2-Orchestrator", `Queued V2: ${row.topic}`, "info");

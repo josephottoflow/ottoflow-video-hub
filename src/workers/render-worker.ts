@@ -18,7 +18,7 @@ import { Worker, Job } from "bullmq";
 import { redisConnection, RENDER_QUEUE, RenderJobData } from "../lib/queue";
 import { PipelineOrchestrator }   from "../agents/pipeline/orchestrator";
 import { PipelineOrchestratorV2 } from "../agents/pipeline/orchestrator-v2";
-import { updateJobStatus, markStuckJobsError, getJob, touchWorkerHeartbeat } from "../lib/db";
+import { updateJobStatus, markStuckJobsError, getJob, touchWorkerHeartbeat, runMigrations } from "../lib/db";
 import { ensureBrowser } from "@remotion/renderer";
 import { emitLog, inferAgent, inferLevel, setStatus, clearLogs } from "../lib/pipeline-store";
 
@@ -140,6 +140,14 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
 async function startup() {
   startStaticServer();
   await checkRedis();
+
+  // Ensure DB schema is up to date (idempotent — safe on every startup)
+  try {
+    await runMigrations();
+    console.log("[worker] DB migrations applied ✓");
+  } catch (err) {
+    console.warn("[worker] DB migration warning:", err instanceof Error ? err.message : err);
+  }
 
   // Forward console.log + console.error to Redis so Vercel SSE shows live progress
   const _origLog   = console.log.bind(console);

@@ -22,22 +22,28 @@ export function getDb(): Pool {
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export type JobStatus = "pending" | "processing" | "done" | "error";
+export type JobVersion = "v1" | "v2";
 
 export interface DbJob {
-  id:           string;
-  row_index:    number;
-  topic:        string;
-  template:     string;
-  status:       JobStatus;
-  error?:       string;
-  output_path?: string;
-  output_link?: string;
-  bull_job_id?: string;
-  created_at:   Date;
-  started_at?:  Date;
-  completed_at?: Date;
-  duration_ms?: number;
-  retry_count:  number;
+  id:             string;
+  row_index:      number;
+  topic:          string;
+  template:       string;
+  status:         JobStatus;
+  version:        JobVersion;
+  render_variant?: string;
+  hook_style?:    string;
+  visual_style?:  string;
+  sheet_name?:    string;
+  error?:         string;
+  output_path?:   string;
+  output_link?:   string;
+  bull_job_id?:   string;
+  created_at:     Date;
+  started_at?:    Date;
+  completed_at?:  Date;
+  duration_ms?:   number;
+  retry_count:    number;
 }
 
 export interface DbContentRow {
@@ -52,14 +58,134 @@ export interface DbContentRow {
   synced_at:  Date;
 }
 
+export interface DbTemplate {
+  id:         string;
+  name:       string;
+  version:    JobVersion;
+  config:     Record<string, unknown>;
+  is_default: boolean;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface DbStoryboard {
+  id:           string;
+  job_id:       string;
+  topic:        string;
+  visual_style?: string;
+  music_mood?:  string;
+  total_frames?: number;
+  full_script?: string;
+  scenes:       unknown[];
+  created_at:   Date;
+}
+
+// ── Schema migration — runs once on startup ───────────────────────────────────
+// Safe to call multiple times; all statements are idempotent.
+
+export async function runMigrations(): Promise<void> {
+  const db = getDb();
+  await db.query(`
+    -- Core jobs table
+    CREATE TABLE IF NOT EXISTS jobs (
+      id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      row_index     INT NOT NULL,
+      topic         TEXT NOT NULL,
+      template      TEXT NOT NULL DEFAULT 'v2-ugc',
+      status        TEXT NOT NULL DEFAULT 'pending',
+      version       TEXT NOT NULL DEFAULT 'v1',
+      render_variant TEXT,
+      hook_style    TEXT,
+      visual_style  TEXT,
+      sheet_name    TEXT,
+      error         TEXT,
+      output_path   TEXT,
+      output_link   TEXT,
+      bull_job_id   TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      started_at    TIMESTAMPTZ,
+      completed_at  TIMESTAMPTZ,
+      duration_ms   INT,
+      retry_count   INT NOT NULL DEFAULT 0
+    );
+
+    -- Add new columns to existing jobs table (safe if already present)
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS version        TEXT NOT NULL DEFAULT 'v1';
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS render_variant TEXT;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS hook_style     TEXT;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS visual_style   TEXT;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS sheet_name     TEXT;
+
+    -- Content rows synced from Google Sheets
+    CREATE TABLE IF NOT EXISTS content_rows (
+      row_index  INT PRIMARY KEY,
+      topic      TEXT NOT NULL,
+      style      TEXT,
+      voice      TEXT,
+      hook_a     TEXT,
+      hook_b     TEXT,
+      hook_c     TEXT,
+      script     TEXT,
+      synced_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    -- Template persistence (replaces lost-on-refresh UI state)
+    CREATE TABLE IF NOT EXISTS templates (
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name        TEXT NOT NULL,
+      version     TEXT NOT NULL DEFAULT 'v2',
+      config      JSONB NOT NULL DEFAULT '{}',
+      is_default  BOOLEAN NOT NULL DEFAULT false,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    -- Storyboard snapshots per job (for replay and debugging)
+    CREATE TABLE IF NOT EXISTS storyboards (
+      id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      job_id       UUID NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+      topic        TEXT NOT NULL,
+      visual_style TEXT,
+      music_mood   TEXT,
+      total_frames INT,
+      full_script  TEXT,
+      scenes       JSONB NOT NULL DEFAULT '[]',
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    -- Worker heartbeat
+    CREATE TABLE IF NOT EXISTS worker_heartbeat (
+      id         TEXT PRIMARY KEY DEFAULT 'main',
+      touched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      worker_host TEXT
+    );
+
+    -- Indexes
+    CREATE INDEX IF NOT EXISTS jobs_status_idx       ON jobs(status);
+    CREATE INDEX IF NOT EXISTS jobs_topic_idx        ON jobs(topic);
+    CREATE INDEX IF NOT EXISTS jobs_created_at_idx   ON jobs(created_at DESC);
+    CREATE INDEX IF NOT EXISTS storyboards_job_id_idx ON storyboards(job_id);
+  `);
+}
+
 // ── Job helpers ────────────────────────────────────────────────────────────────
 
-export async function createJob(rowIndex: number, topic: string, template: string): Promise<DbJob> {
+export async function createJob(
+  rowIndex:  number,
+  topic:     string,
+  template:  string,
+  meta: {
+    version?:       JobVersion;
+    renderVariant?: string;
+    hookStyle?:     string;
+    sheetName?:     string;
+  } = {}
+): Promise<DbJob> {
   const { rows } = await getDb().query<DbJob>(
-    `INSERT INTO jobs (row_index, topic, template)
-     VALUES ($1, $2, $3)
+    `INSERT INTO jobs (row_index, topic, template, version, render_variant, hook_style, sheet_name)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
-    [rowIndex, topic, template]
+    [rowIndex, topic, template, meta.version ?? "v1", meta.renderVariant ?? null, meta.hookStyle ?? null, meta.sheetName ?? null]
   );
   return rows[0];
 }
@@ -67,12 +193,15 @@ export async function createJob(rowIndex: number, topic: string, template: strin
 export async function updateJobStatus(
   id: string,
   status: JobStatus,
-  fields: Partial<Pick<DbJob, "error" | "output_path" | "output_link" | "duration_ms" | "bull_job_id" | "started_at" | "completed_at">> = {}
+  fields: Partial<Pick<DbJob,
+    "error" | "output_path" | "output_link" | "duration_ms" | "bull_job_id" |
+    "started_at" | "completed_at" | "visual_style"
+  >> = {}
 ): Promise<void> {
   if (status === "processing" && !fields.started_at)   fields.started_at   = new Date();
   if ((status === "done" || status === "error") && !fields.completed_at) fields.completed_at = new Date();
 
-  const sets: string[]   = ["status = $2"];
+  const sets: string[]    = ["status = $2"];
   const values: unknown[] = [id, status];
   let i = 3;
 
@@ -139,42 +268,6 @@ export async function updateJobOutputLink(id: string, outputLink: string): Promi
   await getDb().query(`UPDATE jobs SET output_link = $2 WHERE id = $1`, [id, outputLink]);
 }
 
-// ── Worker heartbeat ───────────────────────────────────────────────────────────
-// The render worker calls touchWorkerHeartbeat() every 30s.
-// /api/worker-status reads it to confirm the worker is live — more reliable than BullMQ heartbeats
-// which expire during long renders.
-
-async function ensureHeartbeatTable(): Promise<void> {
-  await getDb().query(`
-    CREATE TABLE IF NOT EXISTS worker_heartbeat (
-      id         TEXT PRIMARY KEY DEFAULT 'main',
-      touched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-}
-
-let _heartbeatTableReady = false;
-
-export async function touchWorkerHeartbeat(): Promise<void> {
-  try {
-    if (!_heartbeatTableReady) { await ensureHeartbeatTable(); _heartbeatTableReady = true; }
-    await getDb().query(`
-      INSERT INTO worker_heartbeat (id, touched_at) VALUES ('main', NOW())
-      ON CONFLICT (id) DO UPDATE SET touched_at = NOW()
-    `);
-  } catch { /* non-fatal — heartbeat is best-effort */ }
-}
-
-export async function getWorkerHeartbeat(): Promise<Date | null> {
-  try {
-    if (!_heartbeatTableReady) { await ensureHeartbeatTable(); _heartbeatTableReady = true; }
-    const { rows } = await getDb().query<{ touched_at: Date }>(
-      `SELECT touched_at FROM worker_heartbeat WHERE id = 'main'`
-    );
-    return rows[0]?.touched_at ?? null;
-  } catch { return null; }
-}
-
 export async function getLastTemplatesForTopic(topic: string, limit = 3): Promise<string[]> {
   try {
     const { rows } = await getDb().query<{ template: string }>(
@@ -195,4 +288,95 @@ export async function hasProcessingJob(withinMs = 10 * 60 * 1000): Promise<boole
     );
     return parseInt(rows[0]?.count ?? "0", 10) > 0;
   } catch { return false; }
+}
+
+// ── Template helpers ───────────────────────────────────────────────────────────
+
+export async function listTemplates(version?: JobVersion): Promise<DbTemplate[]> {
+  const { rows } = version
+    ? await getDb().query<DbTemplate>(`SELECT * FROM templates WHERE version = $1 ORDER BY is_default DESC, name ASC`, [version])
+    : await getDb().query<DbTemplate>(`SELECT * FROM templates ORDER BY version, is_default DESC, name ASC`);
+  return rows;
+}
+
+export async function getTemplate(id: string): Promise<DbTemplate | null> {
+  const { rows } = await getDb().query<DbTemplate>(`SELECT * FROM templates WHERE id = $1`, [id]);
+  return rows[0] ?? null;
+}
+
+export async function upsertTemplate(
+  name:    string,
+  version: JobVersion,
+  config:  Record<string, unknown>,
+  id?:     string
+): Promise<DbTemplate> {
+  if (id) {
+    const { rows } = await getDb().query<DbTemplate>(
+      `UPDATE templates SET name = $2, version = $3, config = $4, updated_at = NOW()
+       WHERE id = $1 RETURNING *`,
+      [id, name, version, JSON.stringify(config)]
+    );
+    if (rows[0]) return rows[0];
+  }
+  const { rows } = await getDb().query<DbTemplate>(
+    `INSERT INTO templates (name, version, config) VALUES ($1, $2, $3) RETURNING *`,
+    [name, version, JSON.stringify(config)]
+  );
+  return rows[0];
+}
+
+export async function deleteTemplate(id: string): Promise<void> {
+  await getDb().query(`DELETE FROM templates WHERE id = $1`, [id]);
+}
+
+// ── Storyboard helpers ─────────────────────────────────────────────────────────
+
+export async function saveStoryboard(
+  jobId:  string,
+  data: {
+    topic:        string;
+    visualStyle?: string;
+    musicMood?:   string;
+    totalFrames?: number;
+    fullScript?:  string;
+    scenes:       unknown[];
+  }
+): Promise<DbStoryboard> {
+  const { rows } = await getDb().query<DbStoryboard>(
+    `INSERT INTO storyboards (job_id, topic, visual_style, music_mood, total_frames, full_script, scenes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING *`,
+    [jobId, data.topic, data.visualStyle ?? null, data.musicMood ?? null,
+     data.totalFrames ?? null, data.fullScript ?? null, JSON.stringify(data.scenes)]
+  );
+  return rows[0];
+}
+
+export async function getStoryboardByJob(jobId: string): Promise<DbStoryboard | null> {
+  const { rows } = await getDb().query<DbStoryboard>(
+    `SELECT * FROM storyboards WHERE job_id = $1 ORDER BY created_at DESC LIMIT 1`,
+    [jobId]
+  );
+  return rows[0] ?? null;
+}
+
+// ── Worker heartbeat ───────────────────────────────────────────────────────────
+
+export async function touchWorkerHeartbeat(workerHost?: string): Promise<void> {
+  try {
+    await getDb().query(`
+      INSERT INTO worker_heartbeat (id, touched_at, worker_host)
+      VALUES ('main', NOW(), $1)
+      ON CONFLICT (id) DO UPDATE SET touched_at = NOW(), worker_host = EXCLUDED.worker_host
+    `, [workerHost ?? process.env.RAILWAY_SERVICE_NAME ?? null]);
+  } catch { /* non-fatal */ }
+}
+
+export async function getWorkerHeartbeat(): Promise<Date | null> {
+  try {
+    const { rows } = await getDb().query<{ touched_at: Date }>(
+      `SELECT touched_at FROM worker_heartbeat WHERE id = 'main'`
+    );
+    return rows[0]?.touched_at ?? null;
+  } catch { return null; }
 }
