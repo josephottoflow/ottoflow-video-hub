@@ -33,7 +33,7 @@ import { LipsyncAgent }        from "../lipsync/lipsync-agent";
 import { getConfig }           from "../config/config";
 import { slugify }             from "../../lib/slug-utils";
 import { setStatus, emitLog }  from "../../lib/pipeline-store";
-import { uploadVideoToDrive }  from "../../lib/google-drive";
+import { uploadFileToR2, isR2Available } from "../../lib/r2";
 import { updateJobStatus }     from "../../lib/db";
 import type { PipelineResult } from "./orchestrator";
 import type { V2UGCData }      from "../../remotion/v2-ugc/types";
@@ -142,9 +142,18 @@ export class PipelineOrchestratorV2 {
 
       emitLog("V2-Orchestrator", "Generating voiceover...", "info");
       const voicePath = await this.voiceover.generate(sb.fullScript, tempDir, row.voice) ?? undefined;
+      let voiceoverUrl: string | undefined;
       if (voicePath) {
         emitLog("V2-Orchestrator", "Voiceover ready", "success");
-        try { fs.copyFileSync(voicePath, path.join(publicContent, "voiceover.mp3")); } catch { /* skip */ }
+        if (isR2Available()) {
+          try {
+            voiceoverUrl = await uploadFileToR2(`voiceover/${slug}/voiceover.mp3`, voicePath, "audio/mpeg");
+          } catch { /* fall through to local copy */ }
+        }
+        if (!voiceoverUrl) {
+          try { fs.copyFileSync(voicePath, path.join(publicContent, "voiceover.mp3")); } catch { /* skip */ }
+          voiceoverUrl = `/content/${slug}/voiceover.mp3`;
+        }
       } else {
         emitLog("V2-Orchestrator", "⚠️ Voiceover skipped — check ELEVENLABS_API_KEY. Video will be silent.", "warning");
       }
@@ -162,8 +171,15 @@ export class PipelineOrchestratorV2 {
           const veoDur  = clampVeoDuration(scene.seconds);
           const clipPath = await this.veo.generateSingleClip(scene.visualPrompt, outPath, veoDur);
           if (clipPath) {
-            try { fs.copyFileSync(clipPath, path.join(publicContent, outFile)); } catch { /* skip */ }
-            clipUrlMap[scene.id] = `/content/${slug}/${outFile}`;
+            let clipUrl: string | undefined;
+            if (isR2Available()) {
+              try { clipUrl = await uploadFileToR2(`clips/${slug}/${outFile}`, clipPath, "video/mp4"); } catch { /* fall through */ }
+            }
+            if (!clipUrl) {
+              try { fs.copyFileSync(clipPath, path.join(publicContent, outFile)); } catch { /* skip */ }
+              clipUrl = `/content/${slug}/${outFile}`;
+            }
+            clipUrlMap[scene.id] = clipUrl;
             emitLog("V2-Orchestrator", `Veo clip ${i + 1}/${sb.scenes.length} — ${scene.beat} (${veoDur}s)`, "success");
           } else {
             emitLog("V2-Orchestrator", `Veo scene ${scene.id} failed — will use Imagen3`, "warning");
@@ -181,8 +197,15 @@ export class PipelineOrchestratorV2 {
             const outPath  = path.join(tempDir, destFile);
             const imgPath  = await this.imagen3.generateSingleImage(scene.visualPrompt, outPath);
             if (imgPath) {
-              try { fs.copyFileSync(imgPath, path.join(publicContent, destFile)); } catch { /* skip */ }
-              imageUrlMap[scene.id] = `/content/${slug}/${destFile}`;
+              let imgUrl: string | undefined;
+              if (isR2Available()) {
+                try { imgUrl = await uploadFileToR2(`images/${slug}/${destFile}`, imgPath, "image/jpeg"); } catch { /* fall through */ }
+              }
+              if (!imgUrl) {
+                try { fs.copyFileSync(imgPath, path.join(publicContent, destFile)); } catch { /* skip */ }
+                imgUrl = `/content/${slug}/${destFile}`;
+              }
+              imageUrlMap[scene.id] = imgUrl;
             }
           } catch (err) {
             emitLog("V2-Orchestrator", `⚠️ Imagen3 failed for ${scene.id} — scene will use gradient background`, "warning");
@@ -203,8 +226,15 @@ export class PipelineOrchestratorV2 {
             const lipsyncClip = await this.lipsync.generateTalkingHead(avatarDest, voicePath, tempDir);
             if (lipsyncClip) {
               const destFile = `lipsync-${insightScene.id}.mp4`;
-              try { fs.copyFileSync(lipsyncClip, path.join(publicContent, destFile)); } catch { /* ignore */ }
-              clipUrlMap[insightScene.id] = `/content/${slug}/${destFile}`;
+              let lipsyncUrl: string | undefined;
+              if (isR2Available()) {
+                try { lipsyncUrl = await uploadFileToR2(`clips/${slug}/${destFile}`, lipsyncClip, "video/mp4"); } catch { /* fall through */ }
+              }
+              if (!lipsyncUrl) {
+                try { fs.copyFileSync(lipsyncClip, path.join(publicContent, destFile)); } catch { /* ignore */ }
+                lipsyncUrl = `/content/${slug}/${destFile}`;
+              }
+              clipUrlMap[insightScene.id] = lipsyncUrl;
               emitLog("V2-Orchestrator", "Talking head ready", "success");
             }
           }
@@ -223,8 +253,6 @@ export class PipelineOrchestratorV2 {
       };
       const musicTrack = await this.music.selectTrack(row, designStub, slug, tempDir).catch(() => null);
       setStatus("running", row.topic, 62);
-
-      const voiceoverUrl = voicePath ? `/content/${slug}/voiceover.mp3` : undefined;
 
       // ── Step 6: Assemble storyboard data for Remotion ─────────────────────
       const storyboardData = {
@@ -272,12 +300,16 @@ export class PipelineOrchestratorV2 {
       const finalVideo = path.join(outDir, `${slug}.mp4`);
       fs.copyFileSync(finalVideoPath, finalVideo);
 
-      // Upload to Google Drive for cloud access (Vercel + Telegram)
-      const driveLink = await uploadVideoToDrive(finalVideo, `${slug}.mp4`).catch((err) => {
-        emitLog("V2-Orchestrator", `Drive upload failed: ${err instanceof Error ? err.message : err}`, "warning");
-        return null;
-      });
-      if (driveLink) emitLog("V2-Orchestrator", `Uploaded to Drive: ${driveLink}`, "success");
+      // Upload final video to R2 for cloud access (Remotion preview + Telegram)
+      let outputLink: string = finalVideo;
+      if (isR2Available()) {
+        try {
+          outputLink = await uploadFileToR2(`videos/${slug}.mp4`, finalVideo, "video/mp4");
+          emitLog("V2-Orchestrator", `Uploaded to R2: ${outputLink}`, "success");
+        } catch (err) {
+          emitLog("V2-Orchestrator", `R2 upload failed: ${err instanceof Error ? err.message : err}`, "warning");
+        }
+      }
 
       setStatus("running", row.topic, 85);
 
@@ -309,7 +341,7 @@ export class PipelineOrchestratorV2 {
         slug,
         success:    approval.decision === "approved",
         outputDir:  outDir,
-        outputLink: driveLink ?? finalVideo,
+        outputLink,
         timing: {
           startedAt,
           completedAt: new Date().toISOString(),

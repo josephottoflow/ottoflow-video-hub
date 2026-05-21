@@ -1,20 +1,23 @@
 /**
- * MUSIC DIRECTOR AGENT — Pixabay Music scraper
+ * MUSIC DIRECTOR AGENT — Jamendo REST API
  *
- * Uses Puppeteer to search pixabay.com/music and intercepts the internal
- * bootstrap JSON that contains full track data including CDN MP3 URLs.
- * Claude Haiku picks the search query based on topic + style + mood.
- * Filters out tracks with YouTube Content ID to avoid copyright claims.
- * Downloads MP3 to temp/{slug}/music.mp3 — no API key required.
+ * Jamendo provides CC-licensed music via a proper HTTP API (no browser/Puppeteer needed).
+ * Works on Vercel, Railway, and any serverless environment.
+ *
+ * Required env var:
+ *   JAMENDO_CLIENT_ID — free API key from https://devportal.jamendo.com
+ *
+ * If JAMENDO_CLIENT_ID is not set, the agent skips music silently.
+ *
+ * API docs: https://developer.jamendo.com/v3.0/tracks
  */
 
-import puppeteer from "puppeteer";
-import * as fs from "fs";
+import * as fs   from "fs";
 import * as path from "path";
 import * as https from "https";
-import * as http from "http";
+import * as http  from "http";
 import type { ContentRow } from "../sheets/client";
-import type { DesignSpec } from "../design/design-agent";
+import type { DesignSpec }  from "../design/design-agent";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -27,202 +30,202 @@ export interface MusicSelection {
   query:       string;
 }
 
-interface PixabayTrack {
-  id:                  number;
-  name:                string;
-  duration:            number;
-  description:         string;
-  hasYoutubeContentId: boolean;
-  user:                { username: string; name: string } | string;
-  sources: {
-    src:         string;
-    downloadUrl: string;
-    filename:    string;
-  };
+interface JamendoTrack {
+  id:            string;
+  name:          string;
+  duration:      number;
+  artist_name:   string;
+  audio:         string;  // streaming URL (mp3)
+  audiodownload: string;  // download URL (mp3)
+  tags:          string[];
 }
 
-// ─── Static query maps (fallback when Claude unavailable) ─────
+interface JamendoResponse {
+  headers: { status: string; code: number };
+  results: JamendoTrack[];
+}
 
-const STYLE_QUERY: Record<string, string> = {
-  educational:       "corporate ambient focus",
-  motivational:      "inspiring uplifting energetic",
-  "case study":      "cinematic corporate storytelling",
-  lifestyle:         "upbeat positive acoustic",
-  "startup-focused": "inspiring electronic innovation",
-  luxury:            "elegant jazz sophisticated",
-  neon:              "electronic energetic vibrant",
+// ─── Mood → Jamendo tags ──────────────────────────────────────
+// Tags reference: https://developer.jamendo.com/v3.0/tracks — use `tags` filter
+
+const MOOD_TAGS: Record<string, string> = {
+  energetic:    "energetic",
+  dramatic:     "cinematic",
+  elegant:      "ambient",
+  bold:         "powerful",
+  calm:         "relaxing",
+  playful:      "happy",
+  professional: "corporate",
+  inspiring:    "uplifting",
+  // Storyboard music moods (from StoryboardAgent)
+  tense:        "dramatic",
+  uplifting:    "uplifting",
+  mysterious:   "ambient",
 };
 
-const MOOD_QUERY: Record<string, string> = {
-  energetic:    "energetic upbeat driving",
-  dramatic:     "cinematic dramatic epic",
-  elegant:      "elegant calm sophisticated",
-  bold:         "bold powerful motivational",
-  calm:         "calm relaxing ambient",
-  playful:      "playful fun happy",
-  professional: "corporate professional focus",
-  inspiring:    "inspiring uplifting hopeful",
+const STYLE_TAGS: Record<string, string> = {
+  educational:       "ambient",
+  motivational:      "uplifting",
+  "case study":      "cinematic",
+  lifestyle:         "acoustic",
+  "startup-focused": "electronic",
+  luxury:            "jazz",
+  neon:              "electronic",
 };
 
-const PIXABAY_BASE = "https://pixabay.com";
+const TOPIC_TAG_OVERRIDES: Array<{ keywords: string[]; tag: string }> = [
+  { keywords: ["sigma","lean","process","dmaic","defect"],                  tag: "corporate" },
+  { keywords: ["startup","entrepreneur","launch","founder"],               tag: "uplifting" },
+  { keywords: ["profit","revenue","sales","growth","roi"],                 tag: "corporate" },
+  { keywords: ["ai","automation","workflow","tech","software"],            tag: "electronic" },
+  { keywords: ["mindset","habit","discipline","success","goal"],           tag: "motivational" },
+  { keywords: ["marketing","brand","content","social"],                    tag: "upbeat" },
+  { keywords: ["finance","invest","money","budget","wealth"],              tag: "ambient" },
+];
+
+const JAMENDO_API = "https://api.jamendo.com/v3.0";
 
 // ─── Music Director Agent ─────────────────────────────────────
-
-// Stop words to skip when extracting topic keywords
-const STOP_WORDS = new Set([
-  "the","a","an","is","are","and","or","for","in","of","to","by","with",
-  "how","what","why","when","where","which","that","this","these","those",
-  "was","were","be","been","being","have","has","had","do","does","did",
-  "will","would","could","should","may","might","must","can","its","your",
-  "our","their","his","her","my","we","they","it","he","she","you","i",
-  "not","no","so","if","but","yet","just","also","only","even","still",
-  "real","really","actually","simply","quickly","easily","without","vs",
-]);
 
 export class MusicAgent {
 
   static isAvailable(): boolean {
-    return true; // Puppeteer + Pixabay — no API key required
+    return !!process.env.JAMENDO_CLIENT_ID;
   }
 
-  async selectTrack(row: ContentRow, design: DesignSpec, slug: string, tempDir?: string): Promise<MusicSelection | null> {
-    const query = await this.buildQuery(row.topic, row.style, design.mood);
-    console.log(`[music] Searching Pixabay for: "${query}"`);
+  async selectTrack(
+    row:     ContentRow,
+    design:  DesignSpec,
+    slug:    string,
+    tempDir?: string
+  ): Promise<MusicSelection | null> {
+    if (!MusicAgent.isAvailable()) {
+      console.log("[music] No JAMENDO_CLIENT_ID — skipping music");
+      return null;
+    }
 
-    let tracks = await this.scrapePixabay(query);
+    const tag   = this.resolveTag(row.topic, row.style, design.mood);
+    const query = `${tag} ${this.topicKeyword(row.topic)}`.trim();
+    console.log(`[music] Jamendo search: tag="${tag}"`);
+
+    let tracks = await this.searchJamendo(tag);
 
     if (tracks.length === 0) {
-      console.log(`[music] No results — trying fallback "corporate ambient"`);
-      tracks = await this.scrapePixabay("corporate ambient");
+      console.log("[music] No results — retrying with 'ambient'");
+      tracks = await this.searchJamendo("ambient");
     }
 
     if (tracks.length === 0) {
-      console.log(`[music] Pixabay returned nothing — skipping music`);
+      console.log("[music] Jamendo returned nothing — skipping music");
       return null;
     }
 
     return this.downloadBestTrack(tracks, slug, query, tempDir);
   }
 
-  // ─── Keyword-based query builder (no external API needed) ──
+  // ─── Tag resolution ──────────────────────────────────────
 
-  private async buildQuery(topic: string, style: string, mood: string): Promise<string> {
-    return this.buildQueryFromKeywords(topic, style, mood);
-  }
-
-  private buildQueryFromKeywords(topic: string, style: string, mood: string): string {
-    const styleBase = STYLE_QUERY[style.toLowerCase()] ?? MOOD_QUERY[mood?.toLowerCase() ?? ""] ?? "corporate ambient";
-
-    // Extract 1-2 meaningful content words from the topic
-    const topicWords = topic
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter(w => w.length > 3 && !STOP_WORDS.has(w));
-
-    // Domain-specific query overrides based on topic keywords
+  private resolveTag(topic: string, style: string, mood: string): string {
     const t = topic.toLowerCase();
-    if (t.includes("sigma") || t.includes("dmaic") || t.includes("defect") || t.includes("lean") || t.includes("process"))
-      return `${topicWords[0] ?? "process"} corporate focus professional`;
-    if (t.includes("startup") || t.includes("entrepreneur") || t.includes("launch") || t.includes("founder"))
-      return "startup inspiring electronic upbeat";
-    if (t.includes("profit") || t.includes("revenue") || t.includes("sales") || t.includes("growth") || t.includes("roi"))
-      return "corporate success motivational driving";
-    if (t.includes("ai") || t.includes("automation") || t.includes("workflow") || t.includes("tech") || t.includes("software"))
-      return "electronic ambient technology innovation";
-    if (t.includes("mindset") || t.includes("habit") || t.includes("discipline") || t.includes("success") || t.includes("goal"))
-      return "motivational inspiring uplifting energetic";
-    if (t.includes("marketing") || t.includes("brand") || t.includes("content") || t.includes("social media"))
-      return "upbeat positive creative energetic";
-    if (t.includes("finance") || t.includes("invest") || t.includes("money") || t.includes("budget") || t.includes("wealth"))
-      return "sophisticated corporate cinematic calm";
 
-    // Combine a topic keyword with the style base for variety
-    if (topicWords.length > 0) return `${topicWords[0]} ${styleBase}`;
-    return styleBase;
+    for (const { keywords, tag } of TOPIC_TAG_OVERRIDES) {
+      if (keywords.some(k => t.includes(k))) return tag;
+    }
+
+    return STYLE_TAGS[style?.toLowerCase()] ?? MOOD_TAGS[mood?.toLowerCase()] ?? "ambient";
   }
 
-  // ─── Puppeteer scraper — intercepts bootstrap JSON ────────
+  private topicKeyword(topic: string): string {
+    const STOP = new Set(["the","a","an","is","are","and","or","for","in","of","to","by","with",
+      "how","what","why","when","where","that","this","was","were","have","has","do","does",
+      "will","would","could","should","can","not","no","so","if","but","just","also","only"]);
+    const words = topic.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/);
+    return words.find(w => w.length > 3 && !STOP.has(w)) ?? "";
+  }
 
-  private async scrapePixabay(query: string): Promise<PixabayTrack[]> {
-    let browser;
+  // ─── Jamendo API call ─────────────────────────────────────
+
+  private async searchJamendo(tag: string): Promise<JamendoTrack[]> {
+    const clientId = process.env.JAMENDO_CLIENT_ID!;
+    const params = new URLSearchParams({
+      client_id:      clientId,
+      format:         "json",
+      limit:          "20",
+      tags:           tag,
+      audioformat:    "mp32",
+      audiodlformat:  "mp32",
+      // Only include tracks licensed for free use
+      ccsa:           "1",  // ShareAlike
+    });
+
+    const url = `${JAMENDO_API}/tracks/?${params}`;
+
     try {
-      browser = await puppeteer.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+      const res = await fetch(url, {
+        headers: { "User-Agent": "OttoflowVideoHub/1.0" },
+        signal:  AbortSignal.timeout(15_000),
       });
 
-      const page   = await browser.newPage();
-      const tracks: PixabayTrack[] = [];
+      if (!res.ok) {
+        console.warn(`[music] Jamendo API error: ${res.status} ${res.statusText}`);
+        return [];
+      }
 
-      await page.setUserAgent(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-      );
+      const data = await res.json() as JamendoResponse;
 
-      // Intercept Pixabay's internal bootstrap JSON — contains full track list
-      page.on("response", async (res) => {
-        if (!res.url().includes("pixabay.com/bootstrap/")) return;
-        const ct = res.headers()["content-type"] || "";
-        if (!ct.includes("json")) return;
-        try {
-          const data    = await res.json();
-          const results = (data?.page?.results || []) as PixabayTrack[];
-          tracks.push(...results);
-        } catch {}
-      });
+      if (data.headers?.code !== 0) {
+        console.warn("[music] Jamendo returned non-zero code:", data.headers);
+        return [];
+      }
 
-      const url = `${PIXABAY_BASE}/music/search/${encodeURIComponent(query)}/`;
-      await page.goto(url, { waitUntil: "networkidle2", timeout: 35000 });
-      await new Promise(r => setTimeout(r, 1500));
-      await browser.close();
-
-      // Filter: must have a CDN src URL and skip YouTube Content ID tracks
-      return tracks.filter(t =>
-        t.sources?.src?.includes("cdn.pixabay.com") &&
-        !t.hasYoutubeContentId
-      );
+      // Filter: must have a download URL and be at least 30s
+      return (data.results ?? []).filter(t => t.audiodownload && t.duration >= 30);
 
     } catch (err) {
-      console.warn(`[music] Scrape error:`, err instanceof Error ? err.message : err);
-      try { await browser?.close(); } catch {}
+      console.warn("[music] Jamendo fetch failed:", err instanceof Error ? err.message : err);
       return [];
     }
   }
 
-  // ─── Pick best track and download ────────────────────────
+  // ─── Pick best track and download ─────────────────────────
 
   private async downloadBestTrack(
-    tracks:  PixabayTrack[],
-    slug:    string,
-    query:   string,
+    tracks:   JamendoTrack[],
+    slug:     string,
+    query:    string,
     tempDir?: string
   ): Promise<MusicSelection | null> {
-    // Prefer tracks >= 30s; take first otherwise
-    const pick = tracks.find(t => t.duration >= 30) ?? tracks[0];
+    // Prefer 60–180s tracks; fall back to first available
+    const pick = tracks.find(t => t.duration >= 60 && t.duration <= 180)
+              ?? tracks.find(t => t.duration >= 30)
+              ?? tracks[0];
+
     if (!pick) return null;
 
-    const cdnUrl    = pick.sources.src;
     const resolvedTempDir = tempDir ?? path.resolve(process.env.TEMP_DIR || "temp", slug);
     fs.mkdirSync(resolvedTempDir, { recursive: true });
     const localPath = path.join(resolvedTempDir, "music.mp3");
 
+    // Use cached file if already downloaded
+    if (fs.existsSync(localPath)) {
+      console.log("[music] Using cached music.mp3");
+      return { name: pick.name, artist: pick.artist_name, duration: pick.duration,
+               downloadUrl: pick.audiodownload, localPath, query };
+    }
+
     try {
-      await this.downloadFile(cdnUrl, localPath);
-      const artistName = typeof pick.user === "string"
-        ? pick.user
-        : pick.user?.name ?? pick.user?.username ?? "Pixabay";
-      console.log(`[music] "${pick.name}" by ${artistName} (${pick.duration}s) — saved`);
+      await this.downloadFile(pick.audiodownload, localPath);
+      console.log(`[music] "${pick.name}" by ${pick.artist_name} (${pick.duration}s) — saved`);
       return {
         name:        pick.name,
-        artist:      artistName,
+        artist:      pick.artist_name,
         duration:    pick.duration,
-        downloadUrl: cdnUrl,
+        downloadUrl: pick.audiodownload,
         localPath,
         query,
       };
     } catch (err) {
-      console.warn(`[music] Download failed:`, err instanceof Error ? err.message : err);
+      console.warn("[music] Download failed:", err instanceof Error ? err.message : err);
       return null;
     }
   }
@@ -240,10 +243,10 @@ export class MusicAgent {
       };
 
       const req = proto.get(url, {
-        timeout: 30000,
+        timeout: 30_000,
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-          "Referer":    "https://pixabay.com/",
+          "User-Agent": "OttoflowVideoHub/1.0",
+          "Referer":    "https://www.jamendo.com/",
         },
       }, (res) => {
         if (res.statusCode === 301 || res.statusCode === 302) {

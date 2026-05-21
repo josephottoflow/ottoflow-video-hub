@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.94.0",
+    "@aws-sdk/client-s3": "^3.1051.0",
     "@google/genai": "^2.2.0",
     "@remotion/cli": "4.0.455",
     "@remotion/google-fonts": "4.0.455",
