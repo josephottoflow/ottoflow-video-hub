@@ -10,6 +10,10 @@ import {
   Film, Send, FileSpreadsheet, Wand2, Clapperboard,
   Image, Tag, Video, Terminal, Eye, FolderOpen,
   Activity, TrendingUp, Layers, Hash, PenLine,
+  Server, Database, Search, AlertCircle, Clock,
+  BarChart2, ChevronDown, ChevronUp, Cpu, Globe,
+  ArrowUpRight, Wifi, Filter, DollarSign, Package,
+  Gauge, X, Power,
 } from "lucide-react";
 import { RemotionPreview, useVideoInfo } from "./components/RemotionPreview";
 
@@ -23,6 +27,69 @@ interface LogEntry { id: number; ts: string; agent: string; message: string; lev
 interface QueueRow { rowIndex: number; topic: string; style: string; status: string; avatarUrl?: string; }
 interface DbJob { id: string; topic: string; template: string; status: string; error?: string; output_link?: string; duration_ms?: number; started_at?: string; progress?: number; }
 interface Services { anthropic: boolean; gemini: boolean; elevenlabs: boolean; pexels: boolean; telegram: boolean; sheets: boolean; n8n: boolean; ffmpeg: boolean; remotion: boolean; branding: boolean; jamendo: boolean; }
+
+// ─── Advanced App Types ───────────────────────────────────────
+
+type AdvSection = "overview" | "pipelines" | "workers" | "logs" | "costs" | "queue";
+
+interface PipelineStage {
+  pipeline_id: string;
+  stage_name: string;
+  status: string;
+  attempt: number;
+  started_at: string | null;
+  completed_at: string | null;
+  duration_s: number | null;
+  error: string | null;
+}
+
+interface Pipeline {
+  id: string;
+  status: string;
+  tier: string;
+  topic: string;
+  style: string;
+  render_variant: string;
+  hook_style: string;
+  current_stage: string;
+  progress_pct: number;
+  error: string | null;
+  queued_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  worker_id: string | null;
+  duration_s: number | null;
+  stages: PipelineStage[];
+}
+
+interface Worker {
+  id: string;
+  status: string;
+  tier: string;
+  concurrency: number;
+  version: string;
+  hostname: string;
+  started_at: string;
+  last_seen: string;
+  heartbeat_age_s: number;
+  uptime_s: number;
+  pipeline_id: string | null;
+  pipeline_topic: string | null;
+  current_stage: string | null;
+  pipeline_progress: number | null;
+}
+
+interface QueueStats {
+  db: { pending: number; running: number; done_today: number; failed_today: number; total: number; avg_duration_s: number | null } | null;
+  bullmq: { waiting: number; active: number; delayed: number } | null;
+}
+
+interface AICosts {
+  total_cost_usd: number;
+  total_requests: number;
+  cache_hit_rate: number;
+  by_provider: Record<string, { cost_usd: number; requests: number }>;
+}
 
 // ─── Pipeline definition ──────────────────────────────────────
 
@@ -89,6 +156,38 @@ function levelColor(level: string) {
 
 function stripSlugPrefix(msg: string | undefined): string {
   return (msg ?? "").replace(/^\[[\w-]+\]\s*/, "");
+}
+
+function fmtDuration(s: number | null | undefined): string {
+  if (s === null || s === undefined) return "—";
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60), rem = s % 60;
+  return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
+}
+
+function fmtAgo(ts: string | null | undefined): string {
+  if (!ts) return "—";
+  const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (diff < 60)    return `${diff}s ago`;
+  if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function getStageColor(status: string): string {
+  if (status === "done" || status === "skipped") return "#10b981";
+  if (status === "running")  return "#6366f1";
+  if (status === "failed")   return "#f43f5e";
+  if (status === "cancelled") return "#f59e0b";
+  return "rgba(255,255,255,0.12)";
+}
+
+function pipelineStatusColor(status: string): string {
+  if (status === "done")    return "#10b981";
+  if (status === "running") return "#6366f1";
+  if (status === "failed")  return "#f43f5e";
+  if (status === "queued" || status === "pending") return "#f59e0b";
+  return "rgba(255,255,255,0.3)";
 }
 
 // ─── Status Pill ──────────────────────────────────────────────
@@ -2303,9 +2402,807 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
   );
 }
 
-// ─── Root ─────────────────────────────────────────────────────
+// ─── Advanced App ─────────────────────────────────────────────
 
-export default function App() {
+const ADV_NAV: { id: AdvSection; label: string; Icon: React.ElementType; desc: string }[] = [
+  { id: "overview",  label: "Overview",  Icon: Gauge,      desc: "System health & stats" },
+  { id: "pipelines", label: "Pipelines", Icon: Film,       desc: "Run history & stages" },
+  { id: "workers",   label: "Workers",   Icon: Server,     desc: "Fleet status" },
+  { id: "logs",      label: "Live Logs", Icon: Terminal,   desc: "Real-time log stream" },
+  { id: "costs",     label: "AI Costs",  Icon: BarChart2,  desc: "Usage & spend" },
+  { id: "queue",     label: "Queue",     Icon: Wand2,      desc: "Add & generate topics" },
+];
+
+function StatCard({ label, value, sub, color = "var(--text)", icon: Icon }: {
+  label: string; value: string | number; sub?: string; color?: string; icon?: React.ElementType;
+}) {
+  return (
+    <div style={{
+      background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)",
+      borderRadius: 12, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 4,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+        {Icon && <Icon size={12} color="var(--text-muted)" strokeWidth={1.8} />}
+        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.7px" }}>{label}</span>
+      </div>
+      <div style={{ fontSize: 26, fontWeight: 800, color, fontFamily: "'SF Mono','Fira Code',monospace", letterSpacing: -1, lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function StageDots({ stages, stageStatuses, compact = true }: {
+  stages?: PipelineStage[];
+  stageStatuses?: Record<string, string>;
+  compact?: boolean;
+}) {
+  const items = ADVANCED_STAGES.map(s => {
+    const dbStage  = stages?.find(d => d.stage_name === s.id);
+    const liveStatus = stageStatuses?.[s.id];
+    const status = liveStatus ?? dbStage?.status ?? "pending";
+    return { ...s, status };
+  });
+
+  if (compact) {
+    return (
+      <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+        {items.map(item => (
+          <div key={item.id} title={`${item.label}: ${item.status}`} style={{
+            width: 7, height: 7, borderRadius: "50%",
+            background: getStageColor(item.status),
+            boxShadow: item.status === "running" ? "0 0 6px #6366f1" : "none",
+            flexShrink: 0,
+            animation: item.status === "running" ? "pulse 1.5s infinite" : "none",
+          }} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 12 }}>
+      {items.map(item => {
+        const { Icon } = item;
+        const isActive = item.status === "running";
+        const isDone   = item.status === "done" || item.status === "skipped";
+        const isFailed = item.status === "failed";
+        return (
+          <div key={item.id} title={`${item.label}: ${item.status}`} style={{
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+            padding: "6px 8px", borderRadius: 8, minWidth: 52, textAlign: "center",
+            background: isActive ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.025)",
+            border: `1px solid ${isActive ? "rgba(99,102,241,0.4)" : isFailed ? "rgba(244,63,94,0.3)" : isDone ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.06)"}`,
+            transition: "all 0.2s",
+          }}>
+            <div style={{
+              width: 24, height: 24, borderRadius: "50%",
+              background: isActive ? "linear-gradient(135deg,#6366f1,#a78bfa)" : isFailed ? "rgba(244,63,94,0.15)" : isDone ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.05)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              position: "relative",
+            }}>
+              {isFailed ? <XCircle size={11} color="#f43f5e" /> : isDone ? <CheckCircle2 size={11} color="#10b981" /> : <Icon size={11} color={isActive ? "#fff" : "var(--text-muted)"} strokeWidth={isActive ? 2.5 : 1.8} />}
+              {isActive && (
+                <motion.span animate={{ scale: [1,1.6,1], opacity: [0.5,0,0.5] }} transition={{ repeat: Infinity, duration: 1.5 }}
+                  style={{ position: "absolute", inset: -3, borderRadius: "50%", border: "2px solid rgba(99,102,241,0.5)" }} />
+              )}
+            </div>
+            <span style={{ fontSize: 8, color: isActive ? "#a78bfa" : isFailed ? "#f43f5e" : isDone ? "#10b981" : "var(--text-muted)", fontWeight: isActive ? 700 : 500, whiteSpace: "nowrap" }}>
+              {item.label}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PipelineRow({ pipeline, isExpanded, onToggle, liveStageStatuses }: {
+  pipeline: Pipeline;
+  isExpanded: boolean;
+  onToggle: () => void;
+  liveStageStatuses?: Record<string, string>;
+}) {
+  const stColor = pipelineStatusColor(pipeline.status);
+  const stageStatuses = pipeline.status === "running" ? liveStageStatuses : undefined;
+
+  return (
+    <div style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+      <div
+        onClick={onToggle}
+        style={{
+          display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
+          cursor: "pointer", transition: "background 0.12s",
+        }}
+        onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.025)")}
+        onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+      >
+        {/* Status dot */}
+        <div style={{
+          width: 8, height: 8, borderRadius: "50%", background: stColor, flexShrink: 0,
+          boxShadow: pipeline.status === "running" ? `0 0 8px ${stColor}` : "none",
+          animation: pipeline.status === "running" ? "pulse 1.5s infinite" : "none",
+        }} />
+
+        {/* Topic */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {displayTopic(pipeline.topic)}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2, display: "flex", gap: 8 }}>
+            <span>{pipeline.style}</span>
+            {pipeline.render_variant && <span>· {pipeline.render_variant}</span>}
+            {pipeline.current_stage && pipeline.status === "running" && <span style={{ color: "#a78bfa" }}>· {pipeline.current_stage}</span>}
+          </div>
+        </div>
+
+        {/* Stage dots */}
+        <StageDots stages={pipeline.stages} stageStatuses={stageStatuses} compact />
+
+        {/* Tier badge */}
+        <span style={{
+          fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 5,
+          background: pipeline.tier === "advanced" ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.05)",
+          color: pipeline.tier === "advanced" ? "#a78bfa" : "var(--text-muted)",
+          border: `1px solid ${pipeline.tier === "advanced" ? "rgba(99,102,241,0.3)" : "rgba(255,255,255,0.08)"}`,
+          textTransform: "uppercase", letterSpacing: "0.5px", flexShrink: 0,
+        }}>
+          {pipeline.tier}
+        </span>
+
+        {/* Duration + time */}
+        <div style={{ fontSize: 10, color: "var(--text-muted)", textAlign: "right", flexShrink: 0, minWidth: 70, fontFamily: "monospace" }}>
+          <div>{fmtDuration(pipeline.duration_s)}</div>
+          <div>{fmtAgo(pipeline.queued_at)}</div>
+        </div>
+
+        {/* Progress if running */}
+        {pipeline.status === "running" && (
+          <div style={{ width: 48, flexShrink: 0 }}>
+            <div style={{ height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${pipeline.progress_pct}%`, background: "linear-gradient(90deg,#6366f1,#22d3ee)", borderRadius: 3, transition: "width 0.5s" }} />
+            </div>
+            <div style={{ fontSize: 9, color: "var(--text-muted)", textAlign: "right", marginTop: 2 }}>{pipeline.progress_pct}%</div>
+          </div>
+        )}
+
+        {/* Chevron */}
+        {isExpanded ? <ChevronUp size={13} color="var(--text-muted)" strokeWidth={2} /> : <ChevronDown size={13} color="var(--text-muted)" strokeWidth={2} />}
+      </div>
+
+      {/* Expanded stage detail */}
+      {isExpanded && (
+        <div style={{ padding: "4px 16px 16px", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+          {pipeline.error && (
+            <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(244,63,94,0.08)", border: "1px solid rgba(244,63,94,0.2)", fontSize: 11, color: "#f43f5e", marginBottom: 12, fontFamily: "monospace" }}>
+              {pipeline.error}
+            </div>
+          )}
+          <StageDots stages={pipeline.stages} stageStatuses={stageStatuses} compact={false} />
+          {pipeline.stages.length > 0 && (
+            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 3 }}>
+              {pipeline.stages.filter(s => s.status !== "pending").map(stage => (
+                <div key={stage.stage_name} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, color: "var(--text-muted)" }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: getStageColor(stage.status), flexShrink: 0 }} />
+                  <span style={{ minWidth: 160, fontFamily: "monospace", color: "var(--text-secondary)" }}>{stage.stage_name}</span>
+                  <span style={{ color: getStageColor(stage.status), fontWeight: 700, minWidth: 55 }}>{stage.status}</span>
+                  <span style={{ fontFamily: "monospace" }}>{fmtDuration(stage.duration_s)}</span>
+                  {stage.error && <span style={{ color: "#f43f5e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{stage.error}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WorkerCard({ worker }: { worker: Worker }) {
+  const isOnline   = worker.status === "online";
+  const isDraining = worker.status === "draining";
+  const dotColor   = isOnline ? "#10b981" : isDraining ? "#f59e0b" : "rgba(255,255,255,0.2)";
+
+  return (
+    <div style={{
+      background: "rgba(255,255,255,0.025)", border: `1px solid ${isOnline ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.07)"}`,
+      borderRadius: 12, padding: "16px 18px",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, boxShadow: isOnline ? "0 0 8px #10b981" : "none", animation: isOnline ? "pulse 2s infinite" : "none", flexShrink: 0 }} />
+        <span style={{ fontSize: 12, fontWeight: 700, color: isOnline ? "#10b981" : "var(--text-secondary)" }}>
+          {isOnline ? "ONLINE" : isDraining ? "DRAINING" : "OFFLINE"}
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 10, fontFamily: "monospace", color: "var(--text-muted)" }}>
+          {worker.tier} · v{worker.version}
+        </span>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 3 }}>Host</div>
+          <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{worker.hostname || "—"}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 3 }}>Uptime</div>
+          <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace" }}>{fmtDuration(worker.uptime_s)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 3 }}>Heartbeat</div>
+          <div style={{ fontSize: 11, fontFamily: "monospace", color: worker.heartbeat_age_s > 30 ? "#f59e0b" : "var(--text-secondary)" }}>
+            {worker.heartbeat_age_s}s ago
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 3 }}>Concurrency</div>
+          <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace" }}>{worker.concurrency}</div>
+        </div>
+      </div>
+
+      {worker.pipeline_topic && (
+        <div style={{ marginTop: 12, padding: "8px 10px", borderRadius: 8, background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.15)" }}>
+          <div style={{ fontSize: 9, color: "#a78bfa", fontWeight: 700, marginBottom: 3 }}>CURRENT JOB</div>
+          <div style={{ fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {displayTopic(worker.pipeline_topic)}
+          </div>
+          {worker.current_stage && (
+            <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2, fontFamily: "monospace" }}>{worker.current_stage}</div>
+          )}
+          {worker.pipeline_progress !== null && (
+            <div style={{ marginTop: 6, height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${worker.pipeline_progress}%`, background: "linear-gradient(90deg,#6366f1,#22d3ee)", transition: "width 0.5s" }} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
+  const [section,           setSection]           = useState<AdvSection>("overview");
+  const [pipelines,         setPipelines]         = useState<Pipeline[]>([]);
+  const [workers,           setWorkers]           = useState<Worker[]>([]);
+  const [queueStats,        setQueueStats]        = useState<QueueStats | null>(null);
+  const [aiCosts,           setAiCosts]           = useState<AICosts | null>(null);
+  const [queue,             setQueue]             = useState<QueueRow[]>([]);
+  const [activePipelineId,  setActivePipelineId]  = useState<string | null>(null);
+  const [stageStatuses,     setStageStatuses]     = useState<Record<string, string>>({});
+  const [logs,              setLogs]              = useState<LogEntry[]>([]);
+  const [pipeStatus,        setPipeStatus]        = useState<Status>("idle");
+  const [workerOnline,      setWorkerOnline]      = useState<boolean | null>(null);
+  const [logSearch,         setLogSearch]         = useState("");
+  const [logLevel,          setLogLevel]          = useState("all");
+  const [pipeFilter,        setPipeFilter]        = useState("all");
+  const [expandedPipeline,  setExpandedPipeline]  = useState<string | null>(null);
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  // Global SSE — reconnects when activePipelineId changes
+  useEffect(() => {
+    let es: EventSource;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+
+    const applyEvent = (ev: Record<string, unknown>) => {
+      const type      = ev.type      as string;
+      const stageName = ev.stageName as string | undefined;
+      const progress  = ev.progress  as number | undefined;
+      const message   = ev.message   as string | undefined;
+
+      if (type === "stage_started" && stageName) {
+        setStageStatuses(p => ({ ...p, [stageName]: "running" }));
+        setPipeStatus("running");
+      } else if (type === "stage_done" && stageName) {
+        setStageStatuses(p => ({ ...p, [stageName]: "done" }));
+        if (progress !== undefined) {/* pipeline list refresh covers this */ }
+      } else if (type === "stage_failed" && stageName) {
+        setStageStatuses(p => ({ ...p, [stageName]: "failed" }));
+      } else if (type === "stage_skipped" && stageName) {
+        setStageStatuses(p => ({ ...p, [stageName]: "skipped" }));
+      } else if (type === "log" && message) {
+        setLogs(p => [...p.slice(-699), { id: Date.now(), ts: new Date().toISOString(), agent: stageName ?? "pipeline", message, level: (ev.level as string) ?? "agent" }]);
+      } else if (type === "pipeline_started") {
+        setPipeStatus("running");
+        toast.loading("Pipeline running…", { id: "adv-pipe" });
+      } else if (type === "pipeline_done") {
+        setPipeStatus("done");
+        toast.dismiss("adv-pipe"); toast.success("Pipeline complete!");
+      } else if (type === "pipeline_failed") {
+        setPipeStatus("error");
+        toast.dismiss("adv-pipe"); toast.error("Pipeline failed");
+      } else if (type === "workers_snapshot" && Array.isArray(ev.workers)) {
+        const ws = ev.workers as Worker[];
+        setWorkers(ws);
+        setWorkerOnline(ws.some(w => w.status === "online"));
+      }
+    };
+
+    const connect = () => {
+      const params = new URLSearchParams({ workers: "1" });
+      if (activePipelineId) params.set("p", activePipelineId);
+      es = new EventSource(`/api/advanced/events?${params}`);
+      es.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data) as Record<string, unknown>;
+          if (msg.type === "snapshot" && Array.isArray(msg.pipelines)) {
+            const pipe = (msg.pipelines as { id: string; status: string; progress_pct?: number }[]).find(p => p.id === activePipelineId);
+            if (pipe) {
+              if (pipe.status === "running") setPipeStatus("running");
+              else if (pipe.status === "done") setPipeStatus("done");
+              else if (pipe.status === "failed") setPipeStatus("error");
+            }
+          } else if (msg.type === "event_replay" && Array.isArray(msg.events)) {
+            setStageStatuses({});
+            (msg.events as Record<string, unknown>[]).forEach(applyEvent);
+          } else {
+            applyEvent(msg);
+          }
+        } catch { /* malformed */ }
+      };
+      es.onerror = () => { es.close(); reconnectTimer = setTimeout(connect, 3_000); };
+    };
+
+    connect();
+    return () => { es?.close(); clearTimeout(reconnectTimer); };
+  }, [activePipelineId]);
+
+  // Fetch pipelines (10s)
+  const fetchPipelines = useCallback(async () => {
+    const statusParam = pipeFilter !== "all" ? `&status=${pipeFilter}` : "";
+    const r = await fetch(`/api/advanced/pipelines?limit=25${statusParam}`).catch(() => null);
+    if (r?.ok) { const d = await r.json(); setPipelines(d.pipelines || []); }
+  }, [pipeFilter]);
+  useEffect(() => { fetchPipelines(); const t = setInterval(fetchPipelines, 10_000); return () => clearInterval(t); }, [fetchPipelines]);
+
+  // Fetch queue-stats (10s)
+  useEffect(() => {
+    const load = async () => {
+      const r = await fetch("/api/advanced/queue-stats").catch(() => null);
+      if (r?.ok) { const d = await r.json(); setQueueStats(d); }
+    };
+    load(); const t = setInterval(load, 10_000); return () => clearInterval(t);
+  }, []);
+
+  // Fetch AI costs (60s)
+  useEffect(() => {
+    const load = async () => {
+      const r = await fetch("/api/ai-costs").catch(() => null);
+      if (r?.ok) { const d = await r.json(); setAiCosts(d); }
+    };
+    load(); const t = setInterval(load, 60_000); return () => clearInterval(t);
+  }, []);
+
+  // Fetch sheet queue (8s)
+  const fetchQueue = useCallback(async () => {
+    const r = await fetch("/api/queue").catch(() => null);
+    if (r?.ok) { const d = await r.json(); setQueue(d.rows || []); }
+  }, []);
+  useEffect(() => { fetchQueue(); const t = setInterval(fetchQueue, 8_000); return () => clearInterval(t); }, [fetchQueue]);
+
+  // Fetch workers (8s)
+  useEffect(() => {
+    const load = async () => {
+      const r = await fetch("/api/advanced/workers").catch(() => null);
+      if (r?.ok) {
+        const d = await r.json();
+        setWorkers(d.workers || []);
+        setWorkerOnline((d.workers as Worker[])?.some(w => w.status === "online") ?? null);
+      }
+    };
+    load(); const t = setInterval(load, 8_000); return () => clearInterval(t);
+  }, []);
+
+  // Scroll logs to bottom
+  useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
+
+  const renderRow = async (row: QueueRow) => {
+    const tid = `adv-${row.rowIndex}`;
+    toast.loading(`Queuing: ${displayTopic(row.topic)}`, { id: tid });
+    const res = await fetch("/api/advanced/pipeline", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: row.topic, style: row.style, rowIndex: row.rowIndex }),
+    }).catch(() => null);
+    if (res?.ok) {
+      const d = await res.json() as { pipelineId: string };
+      setActivePipelineId(d.pipelineId);
+      setStageStatuses({});
+      toast.success(`Queued: ${displayTopic(row.topic)}`, { id: tid });
+      fetchPipelines();
+    } else {
+      toast.error(`Failed: ${displayTopic(row.topic)}`, { id: tid });
+    }
+  };
+
+  const runQueue = async () => {
+    const pending = queue.filter(r => ["Pending", "Queued"].includes(r.status));
+    if (pending.length === 0) { toast.error("No pending rows in queue"); return; }
+    let first: string | null = null;
+    for (const row of pending) {
+      const res = await fetch("/api/advanced/pipeline", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: row.topic, style: row.style, rowIndex: row.rowIndex }),
+      }).catch(() => null);
+      if (res?.ok) {
+        const d = await res.json() as { pipelineId: string };
+        if (!first) { first = d.pipelineId; setActivePipelineId(d.pipelineId); setStageStatuses({}); }
+      }
+    }
+    if (first) { toast.success(`${pending.length} job(s) queued`); fetchPipelines(); }
+  };
+
+  // ── Computed stats ──
+  const dbStats  = queueStats?.db;
+  const bqStats  = queueStats?.bullmq;
+  const onlineWorkerCount = workers.filter(w => w.status === "online").length;
+
+  // ── Filtered logs ──
+  const filteredLogs = logs.filter(e => {
+    if (logLevel !== "all" && e.level !== logLevel) return false;
+    if (logSearch) {
+      const q = logSearch.toLowerCase();
+      return e.message.toLowerCase().includes(q) || (e.agent ?? "").toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  // ── Layout ──
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", background: "#070711", fontFamily: "inherit" }}>
+
+      {/* Sidebar */}
+      <aside style={{
+        width: 210, flexShrink: 0, minHeight: "100vh",
+        background: "linear-gradient(180deg, #0b0b18 0%, #08080f 100%)",
+        borderRight: "1px solid rgba(255,255,255,0.05)",
+        display: "flex", flexDirection: "column",
+        position: "sticky", top: 0, zIndex: 20,
+      }}>
+        {/* Brand */}
+        <div style={{ padding: "18px 16px 14px", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 14 }}>
+            <div style={{
+              width: 34, height: 34, borderRadius: 9, flexShrink: 0,
+              background: "linear-gradient(135deg,#6366f1,#4f46e5)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              boxShadow: "0 0 20px rgba(99,102,241,0.4)",
+            }}>
+              <Video size={15} color="#fff" strokeWidth={1.8} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 14, color: "var(--text)", letterSpacing: -0.4 }}>Ottoflow</div>
+              <div style={{ fontSize: 9, color: "#6366f1", fontWeight: 700, letterSpacing: "0.5px" }}>⚡ ADVANCED</div>
+            </div>
+          </div>
+
+          {/* Pipeline status pill */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 7, padding: "6px 10px", borderRadius: 8,
+            background: pipeStatus === "running" ? "rgba(99,102,241,0.1)" : "rgba(255,255,255,0.03)",
+            border: `1px solid ${pipeStatus === "running" ? "rgba(99,102,241,0.3)" : "rgba(255,255,255,0.06)"}`,
+          }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+              background: pipeStatus === "running" ? "#10b981" : pipeStatus === "done" ? "#10b981" : pipeStatus === "error" ? "#f43f5e" : "rgba(255,255,255,0.15)",
+              boxShadow: pipeStatus === "running" ? "0 0 6px #10b981" : "none",
+              animation: pipeStatus === "running" ? "pulse 1.5s infinite" : "none",
+            }} />
+            <span style={{ fontSize: 10, fontWeight: 600, color: pipeStatus === "running" ? "#a78bfa" : "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {pipeStatus === "running" ? "Pipeline running" : pipeStatus === "done" ? "Pipeline done" : pipeStatus === "error" ? "Error" : "Idle"}
+            </span>
+          </div>
+        </div>
+
+        {/* Nav */}
+        <nav style={{ padding: "10px 8px", flex: 1 }}>
+          {ADV_NAV.map(({ id, label, Icon: NavIcon }) => {
+            const active = section === id;
+            return (
+              <button key={id} onClick={() => setSection(id)} style={{
+                display: "flex", alignItems: "center", gap: 8,
+                width: "100%", padding: "8px 10px", borderRadius: 7,
+                border: "none", cursor: "pointer", textAlign: "left",
+                fontSize: 12, fontWeight: active ? 600 : 400, fontFamily: "inherit", marginBottom: 2,
+                background: active ? "rgba(99,102,241,0.12)" : "transparent",
+                color: active ? "#a78bfa" : "var(--text-muted)",
+                transition: "all 0.12s",
+                position: "relative",
+                boxShadow: active ? "inset 0 0 0 1px rgba(99,102,241,0.2)" : "none",
+              }}>
+                {active && <span style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", width: 3, height: 16, borderRadius: "0 3px 3px 0", background: "linear-gradient(180deg,#6366f1,#a78bfa)" }} />}
+                <NavIcon size={14} strokeWidth={active ? 2.2 : 1.8} />
+                {label}
+                {id === "workers" && (
+                  <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: workerOnline ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.06)", color: workerOnline ? "#10b981" : "var(--text-muted)" }}>
+                    {onlineWorkerCount}
+                  </span>
+                )}
+                {id === "logs" && logs.length > 0 && (
+                  <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: "rgba(99,102,241,0.12)", color: "#a78bfa" }}>
+                    {logs.length}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Switch to Basic */}
+        <div style={{ padding: "12px 10px 16px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+          <button onClick={onSwitchToBasic} style={{
+            width: "100%", padding: "8px 12px", borderRadius: 7,
+            border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)",
+            color: "var(--text-muted)", fontFamily: "inherit", fontSize: 11, fontWeight: 600,
+            cursor: "pointer", display: "flex", alignItems: "center", gap: 7, transition: "all 0.12s",
+          }}>
+            <LayoutDashboard size={12} strokeWidth={1.8} />
+            Switch to Basic
+          </button>
+          <div style={{ marginTop: 10, fontSize: 10, color: "var(--text-muted)", paddingLeft: 4 }}>
+            <div style={{ fontWeight: 600, color: "var(--text-secondary)", fontSize: 10 }}>joseph@ottoflow.ai</div>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <main style={{ flex: 1, minWidth: 0, height: "100vh", overflowY: section === "logs" ? "hidden" : "auto" }}>
+
+        {/* ── OVERVIEW ── */}
+        {section === "overview" && (
+          <div style={{ padding: "28px 32px" }}>
+            <div style={{ marginBottom: 28 }}>
+              <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", marginBottom: 4 }}>System Overview</h1>
+              <p style={{ fontSize: 12, color: "var(--text-muted)" }}>Real-time pipeline health · Last 24 hours</p>
+            </div>
+
+            {/* Stat grid */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12, marginBottom: 32 }}>
+              <StatCard label="Queue Waiting" value={bqStats?.waiting ?? dbStats?.pending ?? "—"} color="#f59e0b" icon={Clock} />
+              <StatCard label="Active Runs" value={bqStats?.active ?? dbStats?.running ?? "—"} color="#6366f1" icon={Activity} sub={`+${bqStats?.delayed ?? 0} delayed`} />
+              <StatCard label="Done Today" value={dbStats?.done_today ?? "—"} color="#10b981" icon={CheckCircle2} />
+              <StatCard label="Failed Today" value={dbStats?.failed_today ?? "—"} color={Number(dbStats?.failed_today) > 0 ? "#f43f5e" : "var(--text-muted)"} icon={AlertCircle} />
+              <StatCard label="Workers Online" value={onlineWorkerCount} color={onlineWorkerCount > 0 ? "#10b981" : "var(--text-muted)"} icon={Server} sub={`${workers.length} total`} />
+              <StatCard label="Avg Duration" value={fmtDuration(dbStats?.avg_duration_s ?? null)} color="var(--text-secondary)" icon={Gauge} />
+            </div>
+
+            {/* Recent pipelines */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 12 }}>Recent Pipelines</div>
+                <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, overflow: "hidden" }}>
+                  {pipelines.length === 0 ? (
+                    <div style={{ padding: "32px", textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
+                      <Film size={24} style={{ opacity: 0.15, display: "block", margin: "0 auto 8px" }} />
+                      No pipelines yet
+                    </div>
+                  ) : pipelines.slice(0, 8).map(p => (
+                    <PipelineRow key={p.id} pipeline={p} isExpanded={expandedPipeline === p.id}
+                      onToggle={() => setExpandedPipeline(prev => prev === p.id ? null : p.id)}
+                      liveStageStatuses={p.id === activePipelineId ? stageStatuses : undefined} />
+                  ))}
+                </div>
+                {pipelines.length > 8 && (
+                  <button onClick={() => setSection("pipelines")} style={{ marginTop: 10, fontSize: 11, color: "#6366f1", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                    View all {pipelines.length} pipelines →
+                  </button>
+                )}
+              </div>
+
+              {/* Worker fleet sidebar */}
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 12 }}>Worker Fleet</div>
+                {workers.length === 0 ? (
+                  <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "28px", textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
+                    <Server size={22} style={{ opacity: 0.15, display: "block", margin: "0 auto 8px" }} />
+                    No workers registered
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {workers.slice(0, 4).map(w => <WorkerCard key={w.id} worker={w} />)}
+                    {workers.length > 4 && (
+                      <button onClick={() => setSection("workers")} style={{ fontSize: 11, color: "#6366f1", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, textAlign: "left" }}>
+                        +{workers.length - 4} more workers →
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── PIPELINES ── */}
+        {section === "pipelines" && (
+          <div style={{ padding: "28px 32px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+              <div>
+                <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", marginBottom: 4 }}>Pipeline Runs</h1>
+                <p style={{ fontSize: 12, color: "var(--text-muted)" }}>{pipelines.length} runs · sorted by queue time</p>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {["all","running","done","failed","queued"].map(f => (
+                  <button key={f} onClick={() => setPipeFilter(f)} style={{
+                    padding: "5px 13px", borderRadius: 20, border: `1px solid ${pipeFilter === f ? "rgba(99,102,241,0.4)" : "rgba(255,255,255,0.08)"}`,
+                    background: pipeFilter === f ? "rgba(99,102,241,0.12)" : "transparent",
+                    color: pipeFilter === f ? "#a78bfa" : "var(--text-muted)",
+                    fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.12s",
+                    textTransform: "capitalize",
+                  }}>
+                    {f}
+                  </button>
+                ))}
+                <button onClick={fetchPipelines} style={{ padding: "5px 11px", borderRadius: 20, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
+                  <RefreshCw size={11} />
+                </button>
+              </div>
+            </div>
+
+            {/* Run queue button */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+              <button onClick={runQueue} style={{
+                display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 8,
+                border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700,
+                background: "linear-gradient(135deg,#6366f1,#a78bfa)", color: "#fff",
+                boxShadow: "0 4px 16px rgba(99,102,241,0.35)",
+              }}>
+                <Play size={12} fill="currentColor" /> Run {queue.filter(r => ["Pending","Queued"].includes(r.status)).length} Pending
+              </button>
+            </div>
+
+            <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, overflow: "hidden" }}>
+              {pipelines.length === 0 ? (
+                <div style={{ padding: "48px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+                  <Film size={32} style={{ opacity: 0.12, display: "block", margin: "0 auto 12px" }} />
+                  No pipelines found
+                  {pipeFilter !== "all" && <div style={{ marginTop: 8, fontSize: 11 }}>Try clearing the filter</div>}
+                </div>
+              ) : (
+                pipelines.map(p => (
+                  <PipelineRow key={p.id} pipeline={p}
+                    isExpanded={expandedPipeline === p.id}
+                    onToggle={() => setExpandedPipeline(prev => prev === p.id ? null : p.id)}
+                    liveStageStatuses={p.id === activePipelineId ? stageStatuses : undefined}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── WORKERS ── */}
+        {section === "workers" && (
+          <div style={{ padding: "28px 32px" }}>
+            <div style={{ marginBottom: 24 }}>
+              <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", marginBottom: 4 }}>Worker Fleet</h1>
+              <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                {onlineWorkerCount} online · {workers.length} total · heartbeat &lt; 30s = healthy
+              </p>
+            </div>
+            {workers.length === 0 ? (
+              <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "64px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+                <Server size={40} style={{ opacity: 0.12, display: "block", margin: "0 auto 16px" }} />
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>No workers registered</div>
+                <div style={{ fontSize: 11 }}>Start the render worker to see it appear here</div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
+                {workers.map(w => <WorkerCard key={w.id} worker={w} />)}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── LOGS ── */}
+        {section === "logs" && (
+          <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
+            {/* Log toolbar */}
+            <div style={{ padding: "14px 24px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "#0b0b18", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+              <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--text)", margin: 0, flexShrink: 0 }}>Live Logs</h2>
+              <div style={{ position: "relative", flex: 1, maxWidth: 340 }}>
+                <Search size={12} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
+                <input
+                  type="text" value={logSearch} onChange={e => setLogSearch(e.target.value)}
+                  placeholder="Search messages or agents…"
+                  style={{ width: "100%", padding: "7px 10px 7px 28px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", color: "var(--text)", fontSize: 11, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 4 }}>
+                {["all","error","agent","info"].map(l => (
+                  <button key={l} onClick={() => setLogLevel(l)} style={{
+                    padding: "5px 11px", borderRadius: 20, border: `1px solid ${logLevel === l ? "rgba(99,102,241,0.4)" : "rgba(255,255,255,0.07)"}`,
+                    background: logLevel === l ? "rgba(99,102,241,0.12)" : "transparent",
+                    color: logLevel === l ? "#a78bfa" : "var(--text-muted)", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", textTransform: "capitalize",
+                  }}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--text-muted)", fontFamily: "monospace" }}>{filteredLogs.length} entries</span>
+              <button onClick={() => setLogs([])} style={{ padding: "5px 11px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.07)", background: "transparent", color: "var(--text-muted)", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                Clear
+              </button>
+            </div>
+
+            {/* Log stream */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#050510", fontFamily: "'SF Mono','Fira Code',monospace", fontSize: 11, padding: "8px 0" }}>
+              {filteredLogs.length === 0 ? (
+                <div style={{ padding: "64px 24px", textAlign: "center", color: "var(--text-muted)" }}>
+                  <Terminal size={28} style={{ opacity: 0.12, display: "block", margin: "0 auto 10px" }} />
+                  <div style={{ fontSize: 12 }}>No log entries {logSearch || logLevel !== "all" ? "matching filter" : "yet"}</div>
+                  <div style={{ fontSize: 10, marginTop: 6 }}>Logs stream in real-time when a pipeline runs</div>
+                </div>
+              ) : filteredLogs.map((entry, idx) => {
+                const tsDate = entry.ts ? new Date(entry.ts) : null;
+                const tsStr  = tsDate && !isNaN(tsDate.getTime())
+                  ? tsDate.toLocaleTimeString("en", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                  : "";
+                return (
+                  <div key={entry.id ?? `${entry.ts}-${idx}`} style={{ display: "flex", gap: 10, padding: "2px 20px 3px", borderLeft: `2px solid ${levelColor(entry.level ?? "")}28`, marginBottom: 1 }}>
+                    <span style={{ fontSize: 9, color: "var(--text-muted)", flexShrink: 0, fontVariantNumeric: "tabular-nums", marginTop: 1 }}>{tsStr}</span>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: "#6366f1", flexShrink: 0, minWidth: 100, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 1 }}>{entry.agent ?? ""}</span>
+                    <span style={{ color: levelColor(entry.level ?? ""), wordBreak: "break-word", lineHeight: 1.5, flex: 1 }}>{stripSlugPrefix(entry.message)}</span>
+                  </div>
+                );
+              })}
+              <div ref={logEndRef} />
+            </div>
+          </div>
+        )}
+
+        {/* ── COSTS ── */}
+        {section === "costs" && (
+          <div style={{ padding: "28px 32px" }}>
+            <div style={{ marginBottom: 28 }}>
+              <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", marginBottom: 4 }}>AI Cost Analytics</h1>
+              <p style={{ fontSize: 12, color: "var(--text-muted)" }}>Usage by provider · Cache efficiency · Cost per render</p>
+            </div>
+
+            {aiCosts === null ? (
+              <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "64px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+                <BarChart2 size={36} style={{ opacity: 0.12, display: "block", margin: "0 auto 14px" }} />
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>No cost data available</div>
+                <div style={{ fontSize: 11 }}>Cost tracking is enabled once pipelines complete with AI stages</div>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12, marginBottom: 28 }}>
+                  <StatCard label="Total Spend" value={`$${aiCosts.total_cost_usd?.toFixed(4) ?? "0"}`} color="#10b981" icon={DollarSign} />
+                  <StatCard label="Total Requests" value={aiCosts.total_requests ?? 0} icon={Activity} />
+                  <StatCard label="Cache Hit Rate" value={`${Math.round((aiCosts.cache_hit_rate ?? 0) * 100)}%`} color={(aiCosts.cache_hit_rate ?? 0) > 0.5 ? "#10b981" : "#f59e0b"} icon={Database} sub="higher = cheaper" />
+                  <StatCard label="Cost / Render" value={aiCosts.total_requests > 0 ? `$${(aiCosts.total_cost_usd / Math.max(1, (dbStats?.done_today ?? 1))).toFixed(4)}` : "—"} icon={Package} />
+                </div>
+
+                {aiCosts.by_provider && Object.keys(aiCosts.by_provider).length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 12 }}>By Provider</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {Object.entries(aiCosts.by_provider).map(([provider, data]) => (
+                        <div key={provider} style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 16px", borderRadius: 10, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                          <span style={{ fontWeight: 700, fontSize: 13, color: "var(--text)", minWidth: 100 }}>{provider}</span>
+                          <span style={{ fontSize: 12, fontFamily: "monospace", color: "var(--text-secondary)" }}>{data.requests} requests</span>
+                          <span style={{ fontSize: 13, fontFamily: "monospace", fontWeight: 700, color: "#10b981", marginLeft: "auto" }}>${data.cost_usd?.toFixed(6)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── QUEUE ── */}
+        {section === "queue" && (
+          <div style={{ maxWidth: 680, margin: "0 auto" }}>
+            <OwnTopicView onGenerate={() => { setSection("pipelines"); fetchPipelines(); }} tier="advanced" />
+          </div>
+        )}
+
+      </main>
+    </div>
+  );
+}
+
+// ─── Basic App ────────────────────────────────────────────────
+
+function BasicApp({ onSwitchToAdvanced }: { onSwitchToAdvanced: () => void }) {
   const [view,        setView]        = useState<View>("center");
   const [tier,        setTier]        = useState<Tier>("basic");
   const [pipeStatus,  setPipeStatus]  = useState<Status>("idle");
@@ -2325,13 +3222,12 @@ export default function App() {
 
   return (
     <>
-      <Toaster
-        position="bottom-right"
-        toastOptions={{ style: { background: "var(--bg-card)", border: "1px solid var(--border-strong)", color: "var(--text)", fontFamily: "inherit", fontSize: 13 } }}
-        richColors
-      />
+      <Toaster position="bottom-right" toastOptions={{ style: { background: "var(--bg-card)", border: "1px solid var(--border-strong)", color: "var(--text)", fontFamily: "inherit", fontSize: 13 } }} richColors />
       <div style={{ display: "flex", minHeight: "100vh" }}>
-        <Sidebar view={view} setView={setView} pipeStatus={pipeStatus} activeAgent={activeAgent} tier={tier} setTier={setTier} />
+        <Sidebar view={view} setView={setView} pipeStatus={pipeStatus} activeAgent={activeAgent} tier={tier} setTier={t => {
+          setTier(t);
+          if (t === "advanced") onSwitchToAdvanced();
+        }} />
         <main style={{ flex: 1, minWidth: 0, overflowY: view === "center" ? "hidden" : "auto", height: view === "center" ? "100vh" : undefined, display: "flex", flexDirection: "column", position: "relative", background: "var(--bg)" }}>
           <AnimatePresence mode="wait">
             <motion.div
@@ -2352,6 +3248,31 @@ export default function App() {
           </AnimatePresence>
         </main>
       </div>
+    </>
+  );
+}
+
+// ─── Root ─────────────────────────────────────────────────────
+
+export default function App() {
+  const [appTier, setAppTier] = useState<Tier>("basic");
+
+  // Persist tier preference across sessions
+  useEffect(() => {
+    const saved = localStorage.getItem("ott-tier") as Tier | null;
+    if (saved === "advanced" || saved === "basic") setAppTier(saved);
+  }, []);
+
+  const switchToAdvanced = () => { setAppTier("advanced"); localStorage.setItem("ott-tier", "advanced"); };
+  const switchToBasic    = () => { setAppTier("basic");    localStorage.setItem("ott-tier", "basic"); };
+
+  return (
+    <>
+      <Toaster position="bottom-right" toastOptions={{ style: { background: "var(--bg-card)", border: "1px solid var(--border-strong)", color: "var(--text)", fontFamily: "inherit", fontSize: 13 } }} richColors />
+      {appTier === "advanced"
+        ? <AdvancedApp onSwitchToBasic={switchToBasic} />
+        : <BasicApp onSwitchToAdvanced={switchToAdvanced} />
+      }
     </>
   );
 }
