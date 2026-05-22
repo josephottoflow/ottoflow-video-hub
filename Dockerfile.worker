@@ -43,8 +43,8 @@ COPY . .
 # Pre-download Remotion's Chrome Headless Shell into the image layer
 RUN npx remotion browser install
 
-# Non-root user so Chrome sandbox works without --no-sandbox
-RUN useradd -m -u 1000 worker && chown -R worker:worker /app
+# Non-root user — use UID 1001 to avoid conflict with Railway's base image
+RUN useradd -m -u 1001 worker && chown -R worker:worker /app
 USER worker
 
 CMD ["npm", "run", "worker"]
