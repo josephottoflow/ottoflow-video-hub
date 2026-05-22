@@ -41,6 +41,6 @@ RUN npm ci
 COPY . .
 
 # Pre-download Remotion's Chrome Headless Shell into the image layer
-RUN npx remotion browser install
+RUN npx remotion browser ensure
 
 CMD ["npm", "run", "worker"]
