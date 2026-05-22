@@ -41,17 +41,23 @@ const PIPELINE_AGENTS = [
   { id: "Telegram Bot",   label: "Telegram Bot",   Icon: Send,            desc: "Delivery" },
 ];
 
-const V2_PIPELINE_AGENTS = [
-  { id: "Sheets Client",    label: "Sheets",       Icon: FileSpreadsheet, desc: "Reads Video Gen rows" },
-  { id: "V2-Orchestrator",  label: "Script",       Icon: Wand2,           desc: "32-word script" },
-  { id: "V2-Orchestrator",  label: "Voiceover",    Icon: Activity,        desc: "ElevenLabs TTS" },
-  { id: "V2-Orchestrator",  label: "Image Prompt", Icon: Zap,             desc: "Scene prompts via Gemini" },
-  { id: "V2-Orchestrator",  label: "Veo 3.1 Lite", Icon: Video,           desc: "AI text-to-video" },
-  { id: "V2-Orchestrator",  label: "Music",        Icon: Music2,          desc: "Pixabay track" },
-  { id: "V2-Orchestrator",  label: "Render",       Icon: Clapperboard,    desc: "Remotion 20s render" },
-  { id: "V2-Orchestrator",  label: "FFmpeg",       Icon: Film,            desc: "Audio mix + grade" },
-  { id: "V2-Orchestrator",  label: "SEO",          Icon: Hash,            desc: "Captions + hashtags" },
-  { id: "Telegram Bot",     label: "Telegram",     Icon: Send,            desc: "Approval + delivery" },
+const ADVANCED_STAGES = [
+  { id: "01-topic-validate",   label: "Validate",  Icon: CheckCircle2, desc: "Topic validation" },
+  { id: "02-script-generate",  label: "Script",    Icon: Wand2,        desc: "AI script generation" },
+  { id: "03-hook-generate",    label: "Hook",      Icon: Zap,          desc: "Hook generation" },
+  { id: "04-scene-plan",       label: "Scenes",    Icon: Clapperboard, desc: "Scene planning" },
+  { id: "05-asset-collect",    label: "Assets",    Icon: Image,        desc: "Asset collection" },
+  { id: "06-voice-generate",   label: "Voice",     Icon: Activity,     desc: "ElevenLabs TTS" },
+  { id: "07-caption-generate", label: "Captions",  Icon: Hash,         desc: "Caption generation" },
+  { id: "08-scene-build",      label: "Build",     Icon: Layers,       desc: "Scene assembly" },
+  { id: "09-lipsync",          label: "Lipsync",   Icon: Video,        desc: "D-ID lipsync" },
+  { id: "10-remotion-render",  label: "Render",    Icon: Film,         desc: "Remotion render" },
+  { id: "11-music-mix",        label: "Music",     Icon: Music2,       desc: "Music mix" },
+  { id: "12-upscale",          label: "Upscale",   Icon: TrendingUp,   desc: "Video upscale" },
+  { id: "13-export",           label: "Export",    Icon: FolderOpen,   desc: "Final export" },
+  { id: "14-upload",           label: "Upload",    Icon: Share2,       desc: "Cloud upload" },
+  { id: "15-analytics",        label: "Analytics", Icon: TrendingUp,   desc: "Analytics" },
+  { id: "16-publish-queue",    label: "Publish",   Icon: Send,         desc: "Telegram approval" },
 ];
 
 const NAV: { id: View; label: string; Icon: React.ElementType }[] = [
@@ -271,6 +277,8 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   const [workerLogs,       setWorkerLogs]       = useState<string[]>([]);
   const [showWorkerLogs,   setShowWorkerLogs]   = useState(false);
   const [avgRenderMs,      setAvgRenderMs]      = useState<number | null>(null);
+  const [activePipelineId, setActivePipelineId] = useState<string | null>(null);
+  const [stageStatuses,    setStageStatuses]    = useState<Record<string, string>>({});
   const logEndRef   = useRef<HTMLDivElement>(null);
   const logPanelRef = useRef<HTMLDivElement>(null);
 
@@ -320,6 +328,78 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     connect();
     return () => { es?.close(); clearTimeout(reconnectTimer); };
   }, []);
+
+  // Advanced pipeline SSE — connects when tier=advanced and a pipeline is active
+  useEffect(() => {
+    if (tier !== "advanced" || !activePipelineId) return;
+    let es: EventSource;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+    const applyEvent = (ev: Record<string, unknown>) => {
+      const type      = ev.type      as string;
+      const stageName = ev.stageName as string | undefined;
+      const progress  = ev.progress  as number | undefined;
+      const message   = ev.message   as string | undefined;
+      if (type === "stage_started" && stageName) {
+        setStageStatuses(prev => ({ ...prev, [stageName]: "running" }));
+        setActiveAgent(stageName);
+        setPipeStatus("running");
+      } else if (type === "stage_done" && stageName) {
+        setStageStatuses(prev => ({ ...prev, [stageName]: "done" }));
+        if (progress !== undefined) setProgress(progress);
+      } else if (type === "stage_failed" && stageName) {
+        setStageStatuses(prev => ({ ...prev, [stageName]: "failed" }));
+      } else if (type === "stage_skipped" && stageName) {
+        setStageStatuses(prev => ({ ...prev, [stageName]: "skipped" }));
+      } else if (type === "log" && message) {
+        setLogs(prev => [...prev.slice(-199), {
+          id: Date.now(), ts: new Date().toISOString(),
+          agent: stageName ?? "pipeline", message, level: "agent",
+        }]);
+      } else if (type === "pipeline_started") {
+        setPipeStatus("running");
+        toast.loading("Advanced pipeline running…", { id: "adv-pipeline" });
+      } else if (type === "pipeline_done") {
+        setPipeStatus("done");
+        setStageStatuses(prev => {
+          const u = { ...prev };
+          Object.keys(u).forEach(k => { if (u[k] === "running") u[k] = "done"; });
+          return u;
+        });
+        toast.dismiss("adv-pipeline"); toast.success("Advanced pipeline complete!");
+      } else if (type === "pipeline_failed") {
+        setPipeStatus("error");
+        toast.dismiss("adv-pipeline"); toast.error("Pipeline failed — check logs");
+      } else if (type === "progress" && progress !== undefined) {
+        setProgress(progress);
+      }
+    };
+    const connect = () => {
+      es = new EventSource(`/api/advanced/events?p=${activePipelineId}&workers=1`);
+      es.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data) as Record<string, unknown>;
+          if (msg.type === "snapshot" && Array.isArray(msg.pipelines)) {
+            const pipe = (msg.pipelines as { id: string; status: string; progress_pct?: number }[])
+              .find(p => p.id === activePipelineId);
+            if (pipe) {
+              if      (pipe.status === "running") setPipeStatus("running");
+              else if (pipe.status === "done")    setPipeStatus("done");
+              else if (pipe.status === "failed")  setPipeStatus("error");
+              if (pipe.progress_pct !== undefined) setProgress(pipe.progress_pct);
+            }
+          } else if (msg.type === "event_replay" && Array.isArray(msg.events)) {
+            setStageStatuses({});
+            (msg.events as Record<string, unknown>[]).forEach(applyEvent);
+          } else {
+            applyEvent(msg);
+          }
+        } catch { /* malformed message */ }
+      };
+      es.onerror = () => { es.close(); reconnectTimer = setTimeout(connect, 3_000); };
+    };
+    connect();
+    return () => { es?.close(); clearTimeout(reconnectTimer); };
+  }, [tier, activePipelineId]);
 
   useEffect(() => {
     const el = logPanelRef.current;
@@ -417,23 +497,54 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   }, []);
 
   const runPipeline = async () => {
-    setRunning(true); setLogs([]); setDoneAgents(new Set());
-    const endpoint = tier === "advanced" ? "/api/pipeline/v2" : "/api/pipeline";
-    await fetch(endpoint, { method: "POST" }).catch(() => null);
+    setRunning(true); setLogs([]); setDoneAgents(new Set()); setStageStatuses({});
+    if (tier === "advanced") {
+      const pending = queue.filter(r => ["Pending", "Queued"].includes(r.status));
+      if (pending.length === 0) { toast.error("No pending rows to queue"); setRunning(false); return; }
+      let first: string | null = null;
+      for (const row of pending) {
+        const res = await fetch("/api/advanced/pipeline", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topic: row.topic, style: row.style, rowIndex: row.rowIndex }),
+        }).catch(() => null);
+        if (res?.ok) {
+          const d = await res.json() as { pipelineId: string };
+          if (!first) { first = d.pipelineId; setActivePipelineId(d.pipelineId); }
+        }
+      }
+      if (first) toast.loading(`Advanced: ${pending.length} job(s) queued`, { id: "adv-pipeline" });
+    } else {
+      await fetch("/api/pipeline", { method: "POST" }).catch(() => null);
+    }
     setRunning(false); fetchQueue();
   };
 
   const renderRow = async (row: QueueRow) => {
     setRenderingRows(prev => new Set([...prev, row.rowIndex]));
+    setStageStatuses({});
     toast.loading(`Rendering: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
-    const endpoint = tier === "advanced" ? "/api/pipeline/v2" : "/api/pipeline";
-    const res = await fetch(endpoint, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rowIndex: row.rowIndex }),
-    }).catch(() => null);
-    setRenderingRows(prev => { const s = new Set(prev); s.delete(row.rowIndex); return s; });
-    if (res?.ok) toast.success(`Queued: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
-    else         toast.error(`Failed: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
+    if (tier === "advanced") {
+      const res = await fetch("/api/advanced/pipeline", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: row.topic, style: row.style, rowIndex: row.rowIndex }),
+      }).catch(() => null);
+      setRenderingRows(prev => { const s = new Set(prev); s.delete(row.rowIndex); return s; });
+      if (res?.ok) {
+        const d = await res.json() as { pipelineId: string };
+        setActivePipelineId(d.pipelineId);
+        toast.success(`Queued: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
+      } else {
+        toast.error(`Failed: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
+      }
+    } else {
+      const res = await fetch("/api/pipeline", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rowIndex: row.rowIndex }),
+      }).catch(() => null);
+      setRenderingRows(prev => { const s = new Set(prev); s.delete(row.rowIndex); return s; });
+      if (res?.ok) toast.success(`Queued: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
+      else         toast.error(`Failed: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
+    }
     fetchQueue();
   };
 
@@ -513,7 +624,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     }
   };
 
-  const agents = tier === "advanced" ? V2_PIPELINE_AGENTS : PIPELINE_AGENTS;
+  const agents = tier === "advanced" ? ADVANCED_STAGES : PIPELINE_AGENTS;
 
   const stats = {
     total:   queue.length,
@@ -812,8 +923,14 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
       }}>
         <div style={{ display: "flex", alignItems: "center", minWidth: "max-content", gap: 0 }}>
           {agents.map((agent, i) => {
-            const isActive = pipeStatus === "running" && activeAgent === agent.id;
-            const isDone   = doneAgents.has(agent.id) || pipeStatus === "done";
+            const stageSt  = tier === "advanced" ? (stageStatuses[agent.id] ?? "pending") : undefined;
+            const isActive = tier === "advanced"
+              ? stageSt === "running"
+              : (pipeStatus === "running" && activeAgent === agent.id);
+            const isDone   = tier === "advanced"
+              ? (stageSt === "done" || stageSt === "skipped")
+              : (doneAgents.has(agent.id) || pipeStatus === "done");
+            const isFailed = tier === "advanced" && stageSt === "failed";
             const { Icon } = agent;
             return (
               <React.Fragment key={`${agent.id}-${i}`}>
@@ -836,13 +953,15 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                     display: "flex", alignItems: "center", justifyContent: "center",
                     background: isActive
                       ? "linear-gradient(135deg,#6366f1,#a78bfa)"
-                      : isDone ? "rgba(16,185,129,0.15)" : "var(--bg-elevated)",
-                    border: `1px solid ${isActive ? "rgba(99,102,241,0.5)" : isDone ? "rgba(16,185,129,0.3)" : "var(--border)"}`,
+                      : isFailed ? "rgba(244,63,94,0.15)" : isDone ? "rgba(16,185,129,0.15)" : "var(--bg-elevated)",
+                    border: `1px solid ${isActive ? "rgba(99,102,241,0.5)" : isFailed ? "rgba(244,63,94,0.3)" : isDone ? "rgba(16,185,129,0.3)" : "var(--border)"}`,
                     boxShadow: isActive ? "0 0 12px rgba(99,102,241,0.4)" : "none",
                     transition: "all 0.25s ease",
                     position: "relative",
                   }}>
-                    {isDone && !isActive
+                    {isFailed
+                      ? <XCircle size={14} color="#f43f5e" strokeWidth={2.5} />
+                      : isDone && !isActive
                       ? <CheckCircle2 size={14} color="#10b981" strokeWidth={2.5} />
                       : <Icon size={14} color={isActive ? "#fff" : "var(--text-muted)"} strokeWidth={isActive ? 2.5 : 1.8} />}
                     {isActive && (
@@ -856,7 +975,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
                   {/* Label */}
                   <span style={{
                     fontSize: 9, fontWeight: isActive ? 700 : 500,
-                    color: isActive ? "var(--accent)" : isDone ? "var(--green)" : "var(--text-muted)",
+                    color: isActive ? "var(--accent)" : isFailed ? "#f43f5e" : isDone ? "var(--green)" : "var(--text-muted)",
                     textAlign: "center", letterSpacing: "0.2px", lineHeight: 1.2,
                     whiteSpace: "nowrap",
                   }}>
@@ -1260,11 +1379,18 @@ function QueueView({ tier }: { tier: Tier }) {
     setRenderingIdx(prev => new Set([...prev, row.rowIndex]));
     const tid = `render-${row.rowIndex}`;
     toast.loading(`Rendering: ${displayTopic(row.topic)}`, { id: tid });
-    const endpoint = tier === "advanced" ? "/api/pipeline/v2" : "/api/pipeline";
-    const res = await fetch(endpoint, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rowIndex: row.rowIndex }),
-    }).catch(() => null);
+    let res;
+    if (tier === "advanced") {
+      res = await fetch("/api/advanced/pipeline", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: row.topic, style: row.style, rowIndex: row.rowIndex }),
+      }).catch(() => null);
+    } else {
+      res = await fetch("/api/pipeline", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rowIndex: row.rowIndex }),
+      }).catch(() => null);
+    }
     setRenderingIdx(prev => { const s = new Set(prev); s.delete(row.rowIndex); return s; });
     if (res?.ok) {
       setRenderedIdx(prev => new Set([...prev, row.rowIndex]));

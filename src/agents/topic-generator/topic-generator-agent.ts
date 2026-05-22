@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { getAIOrchestrator } from "../../ai-orchestrator";
 
 export interface TopicSuggestion {
   topic:       string;
@@ -8,27 +8,21 @@ export interface TopicSuggestion {
 }
 
 export class TopicGeneratorAgent {
-  private ai: GoogleGenAI | null;
-
-  constructor() {
-    const apiKey = process.env.GOOGLE_API_KEY;
-    this.ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
-  }
-
   async generateTopics(
     niche:        string,
     count         = 15,
-    avoidTopics?: string[]
+    avoidTopics?: string[],
+    opts?:        { tier?: "basic" | "advanced"; jobId?: string }
   ): Promise<TopicSuggestion[]> {
-    if (!this.ai) throw new Error("GOOGLE_API_KEY is not set");
-
     const avoidList = avoidTopics?.length
-      ? `\nAVOID these topics (already queued):\n${avoidTopics.slice(0, 30).map(t => `- ${t}`).join("\n")}`
+      ? `\nAVOID these topics (already queued):\n${avoidTopics.slice(0, 30).map((t) => `- ${t}`).join("\n")}`
       : "";
 
-    const prompt = `You are a viral TikTok content strategist specialising in short-form video angles.
+    const systemPrompt = `You are a viral TikTok content strategist specialising in short-form video angles.
+Your job is to generate highly specific, scroll-stopping topic ideas that work as standalone hooks.
+Never produce generic titles. Every topic must be concrete enough to be the hook itself.`;
 
-NICHE: ${niche}
+    const prompt = `NICHE: ${niche}
 COUNT: Generate exactly ${count} SPECIFIC video topic angles.
 ${avoidList}
 
@@ -50,15 +44,22 @@ Output ONLY valid JSON — an array of exactly ${count} objects:
   }
 ]`;
 
-    const response = await this.ai.models.generateContent({
-      model:    "gemini-2.0-flash",
-      contents: prompt,
+    // Advanced tier → Claude Opus for premium topic ideation
+    // Basic tier   → Gemini Flash for cost efficiency
+    const aiResponse = await getAIOrchestrator().generate({
+      taskType:       "topic-generate",
+      prompt,
+      systemPrompt,
+      tier:           opts?.tier ?? "advanced", // default to advanced — topic quality is a differentiator
+      jobId:          opts?.jobId,
+      skipCache:      true, // always generate fresh topics
+      responseFormat: "json",
     });
 
-    const raw = (response.text ?? "").trim().replace(/^```json?\n?/, "").replace(/\n?```$/, "");
+    const raw  = aiResponse.text.trim().replace(/^```json?\n?/, "").replace(/\n?```$/, "");
     const data = JSON.parse(raw);
 
-    if (!Array.isArray(data)) throw new Error("Expected JSON array from Gemini");
+    if (!Array.isArray(data)) throw new Error("Expected JSON array from AI provider");
     return data as TopicSuggestion[];
   }
 }

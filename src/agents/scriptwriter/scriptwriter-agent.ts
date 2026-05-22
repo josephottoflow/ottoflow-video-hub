@@ -10,7 +10,7 @@
  *   3. generateHooks() — 3 attention-grabbing hook variations
  */
 
-import { GoogleGenAI } from "@google/genai";
+import { getAIOrchestrator } from "../../ai-orchestrator";
 import type { ContentRow } from "../sheets/client";
 
 // ─── Types ───────────────────────────────────────────────────
@@ -128,13 +128,7 @@ const VARIANT_ARC: Record<RenderVariant, string> = {
 // ─── Script Writer Agent ──────────────────────────────────────
 
 export class ScriptWriterAgent {
-  private ai: GoogleGenAI | null;
   private tasks: ScriptTask[] = [];
-
-  constructor() {
-    const apiKey = process.env.GOOGLE_API_KEY;
-    this.ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
-  }
 
   /**
    * Generate a script + 3 hook variations for a topic.
@@ -145,9 +139,9 @@ export class ScriptWriterAgent {
     style: string,
     existingHooks?: { a?: string; b?: string; c?: string },
     hookStyle: HookStyle = "question",
-    renderVariant?: RenderVariant
+    renderVariant?: RenderVariant,
+    opts?: { tier?: "basic" | "advanced"; jobId?: string }
   ): Promise<GeneratedScript> {
-    if (!this.ai) throw new Error("GOOGLE_API_KEY is not set");
     const toneGuide = STYLE_TONE[style.toLowerCase()] || STYLE_TONE.educational;
     const hookGuide = HOOK_STYLE_GUIDE[hookStyle];
     const hookHints = [existingHooks?.a, existingHooks?.b, existingHooks?.c].filter(Boolean).join(", ");
@@ -180,12 +174,15 @@ Structural rules:
 - Spoken-word only — no bullet points, no headers, no markdown
 - If you produce an em-dash anywhere, you have failed the task`;
 
-    const response = await this.ai.models.generateContent({
-      model:    "gemini-2.0-flash",
-      contents: prompt,
+    const aiResponse = await getAIOrchestrator().generate({
+      taskType:       "script-generate",
+      prompt,
+      tier:           opts?.tier ?? "basic",
+      jobId:          opts?.jobId,
+      responseFormat: "json",
     });
 
-    const raw  = (response.text ?? "").trim().replace(/^```json?\n?/, "").replace(/\n?```$/, "");
+    const raw  = aiResponse.text.replace(/^```json?\n?/, "").replace(/\n?```$/, "");
     const data = JSON.parse(raw);
 
     const script = humanize(data.script || "");
@@ -205,8 +202,11 @@ Structural rules:
   /**
    * Generate only 3 hook variations (faster — used when script exists).
    */
-  async generateHooks(topic: string, style: string): Promise<{ a: string; b: string; c: string }> {
-    if (!this.ai) throw new Error("GOOGLE_API_KEY is not set");
+  async generateHooks(
+    topic: string,
+    style: string,
+    opts?: { tier?: "basic" | "advanced"; jobId?: string }
+  ): Promise<{ a: string; b: string; c: string }> {
     const prompt = `Generate 3 scroll-stopping video hooks for this topic.
 
 TOPIC: ${topic}
@@ -221,11 +221,14 @@ Output ONLY valid JSON:
   "c": "Direct you-challenge, max 8 words, no em-dashes"
 }`;
 
-    const response = await this.ai.models.generateContent({
-      model:    "gemini-2.0-flash",
-      contents: prompt,
+    const aiResponse = await getAIOrchestrator().generate({
+      taskType:       "hook-generate",
+      prompt,
+      tier:           opts?.tier ?? "basic",
+      jobId:          opts?.jobId,
+      responseFormat: "json",
     });
-    const raw  = (response.text ?? "").trim().replace(/^```json?\n?/, "").replace(/\n?```$/, "");
+    const raw  = aiResponse.text.replace(/^```json?\n?/, "").replace(/\n?```$/, "");
     const data = JSON.parse(raw);
     return {
       a: humanize(data.a || ""),

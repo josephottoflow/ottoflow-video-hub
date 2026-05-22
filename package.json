@@ -11,6 +11,7 @@
     "render:cinematic": "npx remotion render src/remotion/index.ts cinematic output/cinematic.mp4 --codec=h264 --image-format=jpeg --jpeg-quality=90 --port=3100",
     "pipeline": "tsx src/cli/run-pipeline.ts",
     "worker": "tsx src/workers/render-worker.ts",
+    "worker:advanced": "tsx src/workers/advanced-worker.ts",
     "db:up": "docker compose up -d postgres redis",
     "db:down": "docker compose down",
     "validate-env": "tsx src/cli/validate-env.ts"
