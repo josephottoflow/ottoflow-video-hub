@@ -31,6 +31,7 @@ export async function POST(req: Request) {
     const voice     = (body.voice     as string | undefined)?.trim() || "Female energetic";
     const musicVibe      = (body.musicVibe      as string | undefined)?.trim() || undefined;
     const variantOverride = (body.renderVariant as string | undefined)?.trim() || undefined;
+    const scheduledAt   = typeof body.scheduledAt === "number" && body.scheduledAt > Date.now() ? body.scheduledAt : undefined;
     const autoQueue = body.autoQueue !== false;
     const version   = (body.version as string | undefined) === "v2" ? "v2" : "v1";
 
@@ -57,15 +58,15 @@ export async function POST(req: Request) {
 
           if (version === "v2") {
             const job = await createJob(rowIndex, topic, "v2-ugc", { version: "v2", renderVariant, hookStyle, sheetName: "Video Gen", musicVibe });
-            await enqueueRender({ rowIndex, template: "v2-ugc", topic, dbJobId: job.id, version: "v2", sheetName: "Video Gen", renderVariant, hookStyle, musicVibe });
-            await sheets.updateStatus(rowIndex, "Queued");
+            await enqueueRender({ rowIndex, template: "v2-ugc", topic, dbJobId: job.id, version: "v2", sheetName: "Video Gen", renderVariant, hookStyle, musicVibe, scheduledAt });
+            await sheets.updateStatus(rowIndex, scheduledAt ? "Scheduled" : "Queued");
             results.push({ rowIndex, topic, jobId: job.id, template: "v2-ugc" });
           } else {
             const recentTemplates = await getLastTemplatesForTopic(topic);
             const template        = await RenderAgent.selectTemplate(topic, style, recentTemplates);
             const job = await createJob(rowIndex, topic, template, { version: "v1", renderVariant, hookStyle, musicVibe });
-            await enqueueRender({ rowIndex, template, topic, dbJobId: job.id, renderVariant, hookStyle, musicVibe });
-            await sheets.updateStatus(rowIndex, "Queued");
+            await enqueueRender({ rowIndex, template, topic, dbJobId: job.id, renderVariant, hookStyle, musicVibe, scheduledAt });
+            await sheets.updateStatus(rowIndex, scheduledAt ? "Scheduled" : "Queued");
             results.push({ rowIndex, topic, jobId: job.id, template });
           }
         } else {

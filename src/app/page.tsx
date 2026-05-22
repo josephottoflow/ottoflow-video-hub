@@ -1766,7 +1766,8 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
   const [style,      setStyle]      = useState("Educational");
   const [template,   setTemplate]   = useState("listicle");
   const [generating, setGenerating] = useState(false);
-  const [musicVibe,  setMusicVibe]  = useState("Auto");
+  const [musicVibe,   setMusicVibe]   = useState("Auto");
+  const [scheduledAt, setScheduledAt] = useState("");   // ISO datetime-local string
 
   // Batch tab
   const [batchText,    setBatchText]    = useState("");
@@ -1799,14 +1800,16 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
     if (!t) { toast.error("Enter a topic first"); return; }
     setGenerating(true);
     try {
-      const vibeParam = musicVibe !== "Auto" ? musicVibe : undefined;
+      const vibeParam  = musicVibe !== "Auto" ? musicVibe : undefined;
+      const schedParam = scheduledAt ? new Date(scheduledAt).getTime() : undefined;
+      const schedLabel = scheduledAt ? ` at ${new Date(scheduledAt).toLocaleString()}` : "";
       if (tier === "advanced") {
         const res = await fetch("/api/topics", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ topics: [t], style, version: "v2", autoQueue: true, musicVibe: vibeParam }),
+          body: JSON.stringify({ topics: [t], style, version: "v2", autoQueue: true, musicVibe: vibeParam, scheduledAt: schedParam }),
         });
         if (!res.ok) throw new Error("Failed to queue V2 topic");
-        toast.success(`Queued V2: "${t}" — watch progress in Command Center`);
+        toast.success(`Queued V2: "${t}"${schedLabel} — watch progress in Command Center`);
       } else {
         const addRes = await fetch("/api/queue/add", {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -1816,7 +1819,7 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
         const { rowIndex } = await addRes.json();
         const renderRes = await fetch("/api/pipeline", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rowIndex, template, musicVibe: vibeParam }),
+          body: JSON.stringify({ rowIndex, template, musicVibe: vibeParam, scheduledAt: schedParam }),
         });
         if (!renderRes.ok) throw new Error("Failed to queue render job");
         toast.success(`Queued: "${t}" — watch progress in Command Center`);
@@ -1966,6 +1969,30 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {MUSIC_VIBES.map(v => <button key={v} onClick={() => setMusicVibe(v)} style={stylePillStyle(musicVibe === v)}>{v}</button>)}
               </div>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>
+                Schedule <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— leave empty to run immediately</span>
+              </label>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="datetime-local"
+                  value={scheduledAt}
+                  onChange={e => setScheduledAt(e.target.value)}
+                  min={new Date().toISOString().slice(0, 16)}
+                  style={{ flex: 1, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", color: "var(--text)", fontSize: 12, fontFamily: "inherit", colorScheme: "dark" }}
+                />
+                {scheduledAt && (
+                  <button onClick={() => setScheduledAt("")} style={{ background: "rgba(244,63,94,0.1)", border: "1px solid rgba(244,63,94,0.3)", borderRadius: 8, padding: "7px 12px", color: "#f43f5e", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                    Clear
+                  </button>
+                )}
+              </div>
+              {scheduledAt && (
+                <div style={{ marginTop: 5, fontSize: 11, color: "#f59e0b" }}>
+                  Renders at {new Date(scheduledAt).toLocaleString()}
+                </div>
+              )}
             </div>
           </div>
 

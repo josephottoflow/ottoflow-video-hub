@@ -54,12 +54,27 @@ export async function GET() {
       store.listeners.add(onLog);
       store.statusListeners.add(onStatus as never);
 
-      // ── Poll Redis every 2s (picks up worker updates on remote machine) ──
-      let lastLogTs = (redisLogs as Array<{ ts?: string }>).at(-1)?.ts ?? "";
+      // ── Poll Redis (picks up worker updates on remote machine) ──
+      // Active: every 8s. Idle: every 30s. Saves ~75% of Upstash requests vs 2s.
+      let lastLogTs  = (redisLogs as Array<{ ts?: string }>).at(-1)?.ts ?? "";
       let lastStatus = initStatus.status;
+      let idleTicks  = 0;
 
-      const poll = setInterval(async () => {
+      const ACTIVE_INTERVAL = 8_000;
+      const IDLE_INTERVAL   = 30_000;
+      let pollTimer: ReturnType<typeof setTimeout>;
+
+      const doPoll = async () => {
         try {
+          const isIdle = lastStatus === "idle";
+          // When idle, skip most ticks to save Redis requests
+          if (isIdle && idleTicks % Math.round(IDLE_INTERVAL / ACTIVE_INTERVAL) !== 0) {
+            idleTicks++;
+            pollTimer = setTimeout(doPoll, ACTIVE_INTERVAL);
+            return;
+          }
+          idleTicks++;
+
           const [newStatus, freshLogs] = await Promise.all([
             rGetStatus(),
             rGetLogs(20),
@@ -68,6 +83,7 @@ export async function GET() {
           // Push status change
           if (newStatus.status !== lastStatus || newStatus.progress !== initStatus.progress) {
             lastStatus = newStatus.status;
+            idleTicks  = 0; // reset idle counter on state change
             send({ type: "status", status: newStatus.status, currentTopic: newStatus.topic, progress: newStatus.progress });
           }
 
@@ -78,7 +94,10 @@ export async function GET() {
             newLogs.forEach((entry) => send({ type: "log", entry }));
           }
         } catch { /* redis blip — skip tick */ }
-      }, 2000);
+        pollTimer = setTimeout(doPoll, ACTIVE_INTERVAL);
+      };
+
+      pollTimer = setTimeout(doPoll, ACTIVE_INTERVAL);
 
       // ── Heartbeat to keep Vercel connection alive ──
       const hb = setInterval(() => {
@@ -88,7 +107,7 @@ export async function GET() {
       return () => {
         store.listeners.delete(onLog);
         store.statusListeners.delete(onStatus as never);
-        clearInterval(poll);
+        clearTimeout(pollTimer);
         clearInterval(hb);
       };
     },

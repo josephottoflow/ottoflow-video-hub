@@ -81,10 +81,11 @@ export class StoryboardAgent {
   }
 
   async generate(
-    topic:         string,
-    style:         string,
-    renderVariant: string = "problem-first",
-    hookStyle:     string = "shock"
+    topic:          string,
+    style:          string,
+    renderVariant:  string = "problem-first",
+    hookStyle:      string = "shock",
+    existingScript?: string
   ): Promise<Storyboard> {
     if (!this.ai) {
       console.warn("[storyboard] No GOOGLE_API_KEY — using fallback storyboard");
@@ -94,12 +95,16 @@ export class StoryboardAgent {
     const variantGuide = VARIANT_GUIDE[renderVariant] ?? VARIANT_GUIDE["problem-first"];
     const hookGuide    = HOOK_GUIDE[hookStyle]        ?? HOOK_GUIDE["shock"];
 
+    const seedNote = existingScript?.trim()
+      ? `\nSEED SCRIPT (use this as inspiration — preserve the angle and facts, improve the pacing):\n"${existingScript.trim()}"\n`
+      : "";
+
     const prompt = `You are a viral TikTok creative director. Generate a complete video storyboard JSON.
 
 TOPIC: "${topic}"
 CONTENT STYLE: "${style}"
 NARRATIVE VARIANT: ${renderVariant}
-HOOK STYLE: ${hookStyle} — ${hookGuide}
+HOOK STYLE: ${hookStyle} — ${hookGuide}${seedNote}
 
 NARRATIVE ARC (follow this scene structure):
 ${variantGuide}

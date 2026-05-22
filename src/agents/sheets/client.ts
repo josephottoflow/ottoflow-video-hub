@@ -28,6 +28,7 @@ import { getConfig } from "../config/config";
 export type ContentStatus =
   | "Pending"
   | "Queued"       // job added to BullMQ, waiting for worker
+  | "Scheduled"    // job queued with a future delay
   | "Processing"
   | "Rendering"
   | "Approval"

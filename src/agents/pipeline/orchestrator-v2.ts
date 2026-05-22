@@ -126,7 +126,8 @@ export class PipelineOrchestratorV2 {
       const sb: Storyboard = await this.storyboard.generate(
         row.topic, row.style,
         renderVariant ?? "problem-first",
-        hookStyle     ?? "shock"
+        hookStyle     ?? "shock",
+        row.script?.trim() || undefined   // seed Gemini with existing sheet script
       );
       emitLog("V2-Orchestrator", `Storyboard: ${sb.scenes.length} scenes, ${(sb.totalFrames / 30).toFixed(1)}s, style=${sb.visualStyle}`, "success");
       setStatus("running", row.topic, 15);
@@ -219,13 +220,15 @@ export class PipelineOrchestratorV2 {
       }
       setStatus("running", row.topic, 55);
 
-      // D-ID lipsync on first insight scene — only when avatar URL set in sheet
+      // D-ID lipsync on first insight scene — uses sheet avatarUrl or env default
+      const DEFAULT_AVATAR_URL = process.env.DEFAULT_AVATAR_URL ?? "";
       const insightScene = sb.scenes.find(s => s.beat === "insight");
-      if (LipsyncAgent.isAvailable() && voicePath && insightScene && !clipUrlMap[insightScene.id] && row.avatarUrl?.trim()) {
+      const avatarUrl    = row.avatarUrl?.trim() || DEFAULT_AVATAR_URL;
+      if (LipsyncAgent.isAvailable() && voicePath && insightScene && !clipUrlMap[insightScene.id] && avatarUrl) {
         emitLog("V2-Orchestrator", "Downloading avatar for D-ID lipsync...", "info");
         try {
           const avatarDest = path.join(tempDir, "avatar.jpg");
-          const avatarRes  = await fetch(row.avatarUrl.trim());
+          const avatarRes  = await fetch(avatarUrl);
           if (avatarRes.ok) fs.writeFileSync(avatarDest, Buffer.from(await avatarRes.arrayBuffer()));
           if (fs.existsSync(avatarDest)) {
             const lipsyncClip = await this.lipsync.generateTalkingHead(avatarDest, voicePath, tempDir);
@@ -246,6 +249,8 @@ export class PipelineOrchestratorV2 {
         } catch (err) {
           console.warn("[v2] Lipsync failed:", err instanceof Error ? err.message : err);
         }
+      } else if (LipsyncAgent.isAvailable() && !avatarUrl) {
+        emitLog("V2-Orchestrator", "D-ID lipsync skipped — set DEFAULT_AVATAR_URL env or add avatar URL to sheet col U", "warning");
       }
 
       // ── Step 5: Music ─────────────────────────────────────────────────────
