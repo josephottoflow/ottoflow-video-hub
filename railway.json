@@ -6,7 +6,6 @@
   },
   "deploy": {
     "startCommand": "npm run worker",
-    "restartPolicyType": "always",
     "healthcheckPath": "/health"
   }
 }
