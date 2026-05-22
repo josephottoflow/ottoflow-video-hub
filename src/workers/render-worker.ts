@@ -28,7 +28,8 @@ const CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
 // Falls back silently if Next.js dev server already holds the port.
 function startStaticServer() {
   const publicDir = path.resolve("public");
-  const port      = 3000;
+  // Railway injects PORT; fall back to 3000 for local dev
+  const port      = parseInt(process.env.PORT || "3000", 10);
   const MIME: Record<string, string> = {
     ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
@@ -36,6 +37,12 @@ function startStaticServer() {
   };
 
   const server = http.createServer((req, res) => {
+    // Railway health check
+    if (req.url === "/health" || req.url === "/") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("ok");
+      return;
+    }
     const relPath = decodeURIComponent((req.url || "/").split("?")[0]);
     const filePath = path.join(publicDir, relPath);
     if (!filePath.startsWith(publicDir)) { res.writeHead(403); res.end(); return; }
@@ -55,8 +62,9 @@ function startStaticServer() {
     }
   });
 
-  server.listen(port, "127.0.0.1", () =>
-    console.log(`[worker] Static file server → http://localhost:${port}/ (serves public/)`)
+  // Bind to 0.0.0.0 so Railway's health check can reach it
+  server.listen(port, "0.0.0.0", () =>
+    console.log(`[worker] Static file server → http://0.0.0.0:${port}/ (serves public/, health: /health)`)
   );
 }
 
