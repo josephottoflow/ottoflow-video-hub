@@ -14,7 +14,12 @@
     "worker:advanced": "tsx src/workers/advanced-worker.ts",
     "db:up": "docker compose up -d postgres redis",
     "db:down": "docker compose down",
-    "validate-env": "tsx src/cli/validate-env.ts"
+    "validate-env": "tsx src/cli/validate-env.ts",
+    "validate": "tsx scripts/validation/run-all.ts",
+    "validate:quick": "tsx scripts/validation/run-all.ts --quick",
+    "validate:health": "tsx scripts/validation/run-all.ts --only=01",
+    "validate:baseline": "tsx scripts/validation/run-all.ts --only=02",
+    "validate:sse": "tsx scripts/validation/run-all.ts --only=06"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.94.0",

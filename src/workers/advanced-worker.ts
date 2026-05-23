@@ -25,10 +25,11 @@ import { publishWorkerHeartbeat, publishQueueStats } from "../lib/redis/pubsub";
 import { ensureBrowser } from "@remotion/renderer";
 import type { AdvancedPipelineJob } from "../lib/queue/advanced";
 
-const CONCURRENCY    = parseInt(process.env.WORKER_CONCURRENCY ?? "1", 10);
-const GIT_SHA        = process.env.GIT_SHA ?? "dev";
-const WORKER_ID      = `${os.hostname()}:${process.pid}`;
-const HEARTBEAT_MS   = 180_000; // 3 min — was 30s; reduces idle Redis traffic by 83%
+const CONCURRENCY      = parseInt(process.env.WORKER_CONCURRENCY ?? "1", 10);
+const GIT_SHA          = process.env.GIT_SHA ?? "dev";
+const WORKER_ID        = `${os.hostname()}:${process.pid}`;
+const HEARTBEAT_MS     = 180_000; // 3 min — was 30s; reduces idle Redis traffic by 83%
+const VALIDATION_MODE  = process.env.VALIDATION_MODE === "true";
 
 // ── Worker registration ───────────────────────────────────────────────────────
 
@@ -244,6 +245,12 @@ async function startup(): Promise<void> {
 
   console.log(`[worker] Advanced pipeline worker started`);
   console.log(`[worker] ID: ${WORKER_ID} | Queue: ${ADVANCED_QUEUE} | Concurrency: ${CONCURRENCY}`);
+  if (VALIDATION_MODE) {
+    console.log("[worker] VALIDATION_MODE=true — verbose stage + memory logging active");
+    worker.on("active", (job) =>
+      console.log(`[validation] Job active: ${job.id} mem_rss=${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`)
+    );
+  }
 
   // ── Graceful shutdown ─────────────────────────────────────────────────────
   async function shutdown(signal: string): Promise<void> {
