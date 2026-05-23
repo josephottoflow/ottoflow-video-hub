@@ -2419,20 +2419,32 @@ const ADV_NAV: { id: AdvSection; label: string; Icon: React.ElementType; desc: s
   { id: "queue",     label: "Queue",     Icon: Wand2,      desc: "Add & generate topics" },
 ];
 
-function StatCard({ label, value, sub, color = "var(--text)", icon: Icon }: {
+function StatCard({ label, value, sub, color = "#6366f1", icon: Icon }: {
   label: string; value: string | number; sub?: string; color?: string; icon?: React.ElementType;
 }) {
   return (
     <div style={{
-      background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)",
-      borderRadius: 12, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 4,
+      background: "rgba(255,255,255,0.02)",
+      border: "1px solid rgba(255,255,255,0.055)",
+      borderRadius: 12, padding: "16px 20px",
+      position: "relative", overflow: "hidden",
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-        {Icon && <Icon size={12} color="var(--text-muted)" strokeWidth={1.8} />}
-        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.7px" }}>{label}</span>
+      <div style={{
+        position: "absolute", top: 0, left: 0, bottom: 0, width: 3,
+        background: `linear-gradient(180deg, ${color}, ${color}55)`,
+        borderRadius: "12px 0 0 12px",
+      }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 9, paddingLeft: 7 }}>
+        {Icon && <Icon size={10} color="rgba(255,255,255,0.22)" strokeWidth={2} />}
+        <span style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.28)", textTransform: "uppercase", letterSpacing: "0.9px" }}>{label}</span>
       </div>
-      <div style={{ fontSize: 26, fontWeight: 800, color, fontFamily: "'SF Mono','Fira Code',monospace", letterSpacing: -1, lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2 }}>{sub}</div>}
+      <div style={{
+        fontSize: 28, fontWeight: 800, color, lineHeight: 1,
+        letterSpacing: -1, fontVariantNumeric: "tabular-nums", paddingLeft: 7,
+      }}>
+        {value}
+      </div>
+      {sub && <div style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", marginTop: 5, paddingLeft: 7 }}>{sub}</div>}
     </div>
   );
 }
@@ -2443,61 +2455,80 @@ function StageDots({ stages, stageStatuses, compact = true }: {
   compact?: boolean;
 }) {
   const items = ADVANCED_STAGES.map(s => {
-    const dbStage  = stages?.find(d => d.stage_name === s.id);
+    const dbStage    = stages?.find(d => d.stage_name === s.id);
     const liveStatus = stageStatuses?.[s.id];
-    const status = liveStatus ?? dbStage?.status ?? "pending";
-    return { ...s, status };
+    const status     = liveStatus ?? dbStage?.status ?? "pending";
+    return { ...s, status, dbStage };
   });
 
   if (compact) {
     return (
-      <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
         {items.map(item => (
-          <div key={item.id} title={`${item.label}: ${item.status}`} style={{
-            width: 7, height: 7, borderRadius: "50%",
-            background: getStageColor(item.status),
-            boxShadow: item.status === "running" ? "0 0 6px #6366f1" : "none",
-            flexShrink: 0,
-            animation: item.status === "running" ? "pulse 1.5s infinite" : "none",
-          }} />
+          <div
+            key={item.id}
+            title={`${item.label}: ${item.status}`}
+            style={{
+              width: 5, height: 14, borderRadius: 2, flexShrink: 0,
+              background: getStageColor(item.status),
+              boxShadow: item.status === "running" ? `0 0 7px ${getStageColor(item.status)}` : "none",
+              animation: item.status === "running" ? "pulse 1.5s infinite" : "none",
+              transition: "background 0.3s",
+            }}
+          />
         ))}
       </div>
     );
   }
 
   return (
-    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 12 }}>
-      {items.map(item => {
-        const { Icon } = item;
-        const isActive = item.status === "running";
-        const isDone   = item.status === "done" || item.status === "skipped";
-        const isFailed = item.status === "failed";
-        return (
-          <div key={item.id} title={`${item.label}: ${item.status}`} style={{
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
-            padding: "6px 8px", borderRadius: 8, minWidth: 52, textAlign: "center",
-            background: isActive ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.025)",
-            border: `1px solid ${isActive ? "rgba(99,102,241,0.4)" : isFailed ? "rgba(244,63,94,0.3)" : isDone ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.06)"}`,
-            transition: "all 0.2s",
-          }}>
-            <div style={{
-              width: 24, height: 24, borderRadius: "50%",
-              background: isActive ? "linear-gradient(135deg,#6366f1,#a78bfa)" : isFailed ? "rgba(244,63,94,0.15)" : isDone ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.05)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              position: "relative",
-            }}>
-              {isFailed ? <XCircle size={11} color="#f43f5e" /> : isDone ? <CheckCircle2 size={11} color="#10b981" /> : <Icon size={11} color={isActive ? "#fff" : "var(--text-muted)"} strokeWidth={isActive ? 2.5 : 1.8} />}
-              {isActive && (
-                <motion.span animate={{ scale: [1,1.6,1], opacity: [0.5,0,0.5] }} transition={{ repeat: Infinity, duration: 1.5 }}
-                  style={{ position: "absolute", inset: -3, borderRadius: "50%", border: "2px solid rgba(99,102,241,0.5)" }} />
+    <div style={{ overflowX: "auto", paddingBottom: 4, marginTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", minWidth: "max-content" }}>
+        {items.map((item, i) => {
+          const { Icon } = item;
+          const isActive = item.status === "running";
+          const isDone   = item.status === "done" || item.status === "skipped";
+          const isFailed = item.status === "failed";
+          const dur      = item.dbStage?.duration_s;
+          return (
+            <div key={item.id} style={{ display: "flex", alignItems: "flex-start" }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, width: 52 }}>
+                <div style={{
+                  width: 30, height: 30, borderRadius: "50%", position: "relative", flexShrink: 0,
+                  background: isActive ? "linear-gradient(135deg,#6366f1,#a78bfa)" : isFailed ? "rgba(244,63,94,0.12)" : isDone ? "rgba(16,185,129,0.12)" : "rgba(255,255,255,0.04)",
+                  border: `1.5px solid ${isActive ? "#6366f1" : isFailed ? "rgba(244,63,94,0.3)" : isDone ? "rgba(16,185,129,0.3)" : "rgba(255,255,255,0.08)"}`,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  {isFailed
+                    ? <XCircle size={13} color="#f43f5e" />
+                    : isDone
+                      ? <CheckCircle2 size={13} color="#10b981" />
+                      : <Icon size={13} color={isActive ? "#fff" : "rgba(255,255,255,0.3)"} strokeWidth={isActive ? 2.5 : 1.8} />
+                  }
+                  {isActive && (
+                    <motion.span
+                      animate={{ scale: [1, 1.5, 1], opacity: [0.6, 0, 0.6] }}
+                      transition={{ repeat: Infinity, duration: 1.5 }}
+                      style={{ position: "absolute", inset: -4, borderRadius: "50%", border: "2px solid rgba(99,102,241,0.45)" }}
+                    />
+                  )}
+                </div>
+                <span style={{ fontSize: 8, textAlign: "center", whiteSpace: "nowrap", fontWeight: isActive || isDone ? 700 : 500, color: isActive ? "#a78bfa" : isFailed ? "#f43f5e" : isDone ? "#10b981" : "rgba(255,255,255,0.2)" }}>
+                  {item.label}
+                </span>
+                {dur != null && (
+                  <span style={{ fontSize: 7, color: "rgba(255,255,255,0.18)", fontFamily: "monospace", marginTop: -2 }}>
+                    {fmtDuration(dur)}
+                  </span>
+                )}
+              </div>
+              {i < items.length - 1 && (
+                <div style={{ width: 8, height: 1.5, marginTop: 14, flexShrink: 0, background: isDone ? "rgba(16,185,129,0.3)" : "rgba(255,255,255,0.06)" }} />
               )}
             </div>
-            <span style={{ fontSize: 8, color: isActive ? "#a78bfa" : isFailed ? "#f43f5e" : isDone ? "#10b981" : "var(--text-muted)", fontWeight: isActive ? 700 : 500, whiteSpace: "nowrap" }}>
-              {item.label}
-            </span>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -2541,33 +2572,32 @@ function PipelineRow({ pipeline, isExpanded, onToggle, liveStageStatuses, onRefr
   }
 
   return (
-    <div style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+    <div style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", position: "relative" }}>
+      {/* Left status accent */}
+      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: stColor, opacity: 0.65, borderRadius: "0 0 0 0" }} />
+
       <div
         onClick={onToggle}
         style={{
-          display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
+          display: "flex", alignItems: "center", gap: 12, padding: "13px 16px 13px 20px",
           cursor: "pointer", transition: "background 0.12s",
         }}
-        onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.025)")}
+        onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.018)")}
         onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
       >
-        {/* Status dot */}
-        <div style={{
-          width: 8, height: 8, borderRadius: "50%", background: stColor, flexShrink: 0,
-          boxShadow: pipeline.status === "running" ? `0 0 8px ${stColor}` : "none",
-          animation: pipeline.status === "running" ? "pulse 1.5s infinite" : "none",
-        }} />
-
-        {/* Topic */}
+        {/* Topic + meta */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 5 }}>
             {displayTopic(pipeline.topic)}
           </div>
-          <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2, display: "flex", gap: 8 }}>
-            <span>{pipeline.style}</span>
-            {pipeline.render_variant && <span>· {pipeline.render_variant}</span>}
-            {pipeline.current_stage && pipeline.status === "running" && <span style={{ color: "#a78bfa" }}>· {pipeline.current_stage}</span>}
-            {pipeline.retry_count > 0 && <span style={{ color: "#f59e0b" }}>· retry #{pipeline.retry_count}</span>}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 4, background: `${stColor}18`, color: stColor, border: `1px solid ${stColor}35`, textTransform: "uppercase", letterSpacing: "0.5px", flexShrink: 0 }}>
+              {pipeline.status}
+            </span>
+            <span style={{ fontSize: 10, color: "var(--text-muted)" }}>{pipeline.style}</span>
+            {pipeline.render_variant && <span style={{ fontSize: 10, color: "var(--text-muted)" }}>· {pipeline.render_variant}</span>}
+            {pipeline.current_stage && pipeline.status === "running" && <span style={{ fontSize: 10, color: "#a78bfa" }}>· {pipeline.current_stage}</span>}
+            {pipeline.retry_count > 0 && <span style={{ fontSize: 10, color: "#f59e0b" }}>· retry #{pipeline.retry_count}</span>}
           </div>
         </div>
 
@@ -2700,87 +2730,99 @@ function PipelineRow({ pipeline, isExpanded, onToggle, liveStageStatuses, onRefr
 function WorkerCard({ worker }: { worker: Worker }) {
   const isOnline   = worker.status === "online";
   const isDraining = worker.status === "draining";
-  const dotColor   = isOnline ? "#10b981" : isDraining ? "#f59e0b" : "rgba(255,255,255,0.2)";
+  const statusColor = isOnline ? "#10b981" : isDraining ? "#f59e0b" : "rgba(255,255,255,0.15)";
 
   const rss = worker.memory_rss_mb;
-  const memColor = rss == null ? "var(--text-secondary)"
+  const memPct   = rss != null ? Math.min(rss / 12, 100) : 0;
+  const memColor = rss == null ? "rgba(255,255,255,0.25)"
     : rss > 900 ? "#f43f5e"
     : rss > 600 ? "#f59e0b"
     : "#10b981";
 
   return (
     <div style={{
-      background: "rgba(255,255,255,0.025)", border: `1px solid ${isOnline ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.07)"}`,
-      borderRadius: 12, padding: "16px 18px",
+      background: "rgba(255,255,255,0.02)",
+      border: `1px solid ${isOnline ? "rgba(16,185,129,0.12)" : "rgba(255,255,255,0.06)"}`,
+      borderRadius: 12, overflow: "hidden",
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, boxShadow: isOnline ? "0 0 8px #10b981" : "none", animation: isOnline ? "pulse 2s infinite" : "none", flexShrink: 0 }} />
-        <span style={{ fontSize: 12, fontWeight: 700, color: isOnline ? "#10b981" : "var(--text-secondary)" }}>
-          {isOnline ? "ONLINE" : isDraining ? "DRAINING" : "OFFLINE"}
-        </span>
-        <span style={{ marginLeft: "auto", fontSize: 10, fontFamily: "monospace", color: "var(--text-muted)" }}>
-          {worker.tier} · v{worker.version}
-        </span>
-      </div>
+      {/* Status top bar */}
+      <div style={{ height: 2, background: statusColor, opacity: isOnline ? 1 : 0.4 }} />
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <div>
-          <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 3 }}>Host</div>
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{worker.hostname || "—"}</div>
-        </div>
-        <div>
-          <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 3 }}>Uptime</div>
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace" }}>{fmtDuration(worker.uptime_s)}</div>
-        </div>
-        <div>
-          <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 3 }}>Heartbeat</div>
-          <div style={{ fontSize: 11, fontFamily: "monospace", color: worker.heartbeat_age_s > 30 ? "#f59e0b" : "var(--text-secondary)" }}>
-            {worker.heartbeat_age_s}s ago
+      <div style={{ padding: "14px 16px" }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 14 }}>
+          <div style={{
+            width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+            background: isOnline ? "rgba(16,185,129,0.08)" : "rgba(255,255,255,0.03)",
+            border: `1px solid ${isOnline ? "rgba(16,185,129,0.18)" : "rgba(255,255,255,0.07)"}`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <Server size={14} color={isOnline ? "#10b981" : "rgba(255,255,255,0.2)"} strokeWidth={1.8} />
           </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 3 }}>Renders</div>
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace" }}>{worker.renders_this_session ?? 0} session</div>
-        </div>
-      </div>
-
-      {/* Memory bar */}
-      {rss != null && (
-        <div style={{ marginTop: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
-            <span style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>Memory (RSS)</span>
-            <span style={{ fontSize: 10, fontFamily: "monospace", color: memColor, fontWeight: 700 }}>{rss} MB</span>
-          </div>
-          <div style={{ height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden" }}>
-            <div style={{
-              height: "100%",
-              width: `${Math.min(rss / 12, 100)}%`,
-              background: rss > 900 ? "#f43f5e" : rss > 600 ? "#f59e0b" : "linear-gradient(90deg,#10b981,#22d3ee)",
-              borderRadius: 3, transition: "width 1s",
-            }} />
-          </div>
-          <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 2 }}>
-            heap {worker.memory_heap_mb ?? "—"} MB · limit ~1200 MB
-          </div>
-        </div>
-      )}
-
-      {worker.pipeline_topic && (
-        <div style={{ marginTop: 12, padding: "8px 10px", borderRadius: 8, background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.15)" }}>
-          <div style={{ fontSize: 9, color: "#a78bfa", fontWeight: 700, marginBottom: 3 }}>CURRENT JOB</div>
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {displayTopic(worker.pipeline_topic)}
-          </div>
-          {worker.current_stage && (
-            <div style={{ fontSize: 10, color: "var(--text-muted)", marginTop: 2, fontFamily: "monospace" }}>{worker.current_stage}</div>
-          )}
-          {worker.pipeline_progress !== null && (
-            <div style={{ marginTop: 6, height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${worker.pipeline_progress}%`, background: "linear-gradient(90deg,#6366f1,#22d3ee)", transition: "width 0.5s" }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {worker.hostname || worker.id.slice(0, 12)}
             </div>
-          )}
+            <div style={{ fontSize: 9, color: statusColor, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px", marginTop: 2 }}>
+              {worker.status} · {worker.tier} · v{worker.version}
+            </div>
+          </div>
         </div>
-      )}
+
+        {/* 3-col stats */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
+          {([
+            { label: "Uptime",    value: fmtDuration(worker.uptime_s),          color: "var(--text-secondary)" },
+            { label: "Heartbeat", value: `${worker.heartbeat_age_s}s`,           color: worker.heartbeat_age_s > 30 ? "#f59e0b" : "var(--text-secondary)" },
+            { label: "Renders",   value: String(worker.renders_this_session ?? 0), color: "var(--text-secondary)" },
+          ] as { label: string; value: string; color: string }[]).map(({ label, value, color }) => (
+            <div key={label}>
+              <div style={{ fontSize: 8, color: "rgba(255,255,255,0.22)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 3 }}>{label}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "monospace", color, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Memory gauge */}
+        {rss != null && (
+          <div style={{ marginBottom: 4 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+              <span style={{ fontSize: 8, color: "rgba(255,255,255,0.22)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                Memory RSS
+              </span>
+              <span style={{ fontSize: 10, fontFamily: "monospace", color: memColor, fontWeight: 700 }}>{rss} MB · {Math.round(memPct)}%</span>
+            </div>
+            <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 4, overflow: "hidden" }}>
+              <div style={{
+                height: "100%", width: `${memPct}%`,
+                background: rss > 900 ? "#f43f5e" : rss > 600 ? "#f59e0b" : "linear-gradient(90deg,#10b981,#22d3ee)",
+                borderRadius: 4, transition: "width 1s",
+              }} />
+            </div>
+            <div style={{ fontSize: 8, color: "rgba(255,255,255,0.18)", marginTop: 3 }}>
+              heap {worker.memory_heap_mb ?? "—"} MB · ceiling ~1200 MB
+            </div>
+          </div>
+        )}
+
+        {/* Current job */}
+        {worker.pipeline_topic && (
+          <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 8, background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.13)" }}>
+            <div style={{ fontSize: 8, color: "#a78bfa", fontWeight: 700, letterSpacing: "0.6px", textTransform: "uppercase", marginBottom: 3 }}>Current Job</div>
+            <div style={{ fontSize: 11, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {displayTopic(worker.pipeline_topic)}
+            </div>
+            {worker.current_stage && (
+              <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 2, fontFamily: "monospace" }}>{worker.current_stage}</div>
+            )}
+            {worker.pipeline_progress !== null && (
+              <div style={{ marginTop: 7, height: 3, background: "rgba(255,255,255,0.07)", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${worker.pipeline_progress}%`, background: "linear-gradient(90deg,#6366f1,#22d3ee)", transition: "width 0.5s" }} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -3089,8 +3131,8 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
               <StatCard label="Avg Duration" value={fmtDuration(dbStats?.avg_duration_s ?? null)} color="var(--text-secondary)" icon={Gauge} />
             </div>
 
-            {/* Recent pipelines */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 20 }}>
+            {/* Center: pipeline list + live log stream */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 20, marginBottom: 24 }}>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 12 }}>Recent Pipelines</div>
                 <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, overflow: "hidden" }}>
@@ -3113,25 +3155,59 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
                 )}
               </div>
 
-              {/* Worker fleet sidebar */}
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 12 }}>Worker Fleet</div>
-                {workers.length === 0 ? (
-                  <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "28px", textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
-                    <Server size={22} style={{ opacity: 0.15, display: "block", margin: "0 auto 8px" }} />
-                    No workers registered
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {workers.slice(0, 4).map(w => <WorkerCard key={w.id} worker={w} />)}
-                    {workers.length > 4 && (
-                      <button onClick={() => setSection("workers")} style={{ fontSize: 11, color: "#6366f1", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, textAlign: "left" }}>
+              {/* Live log stream */}
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 12 }}>Live Log Stream</div>
+                <div style={{
+                  flex: 1, background: "#050510", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12,
+                  fontFamily: "'SF Mono','Fira Code',monospace", fontSize: 10,
+                  overflowY: "auto", maxHeight: 380, padding: "8px 0",
+                }}>
+                  {logs.length === 0 ? (
+                    <div style={{ padding: "32px 16px", textAlign: "center", color: "rgba(255,255,255,0.15)" }}>
+                      <Terminal size={20} style={{ display: "block", margin: "0 auto 8px", opacity: 0.4 }} />
+                      <div style={{ fontSize: 11 }}>Streams when a pipeline runs</div>
+                    </div>
+                  ) : logs.slice(-60).map((entry, idx) => {
+                    const tsDate = entry.ts ? new Date(entry.ts) : null;
+                    const tsStr  = tsDate && !isNaN(tsDate.getTime())
+                      ? tsDate.toLocaleTimeString("en", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                      : "";
+                    return (
+                      <div key={entry.id ?? `${entry.ts}-${idx}`} style={{ display: "flex", gap: 6, padding: "2px 10px", borderLeft: `2px solid ${levelColor(entry.level ?? "")}22` }}>
+                        <span style={{ fontSize: 8, color: "rgba(255,255,255,0.2)", flexShrink: 0, marginTop: 1, fontVariantNumeric: "tabular-nums" }}>{tsStr}</span>
+                        <span style={{ color: levelColor(entry.level ?? ""), wordBreak: "break-word", lineHeight: 1.5, flex: 1, fontSize: 10 }}>{stripSlugPrefix(entry.message)}</span>
+                      </div>
+                    );
+                  })}
+                  <div ref={logEndRef} />
+                </div>
+                <button onClick={() => setSection("logs")} style={{ marginTop: 8, fontSize: 11, color: "#6366f1", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, textAlign: "left" }}>
+                  Open full log terminal →
+                </button>
+              </div>
+            </div>
+
+            {/* Worker fleet — horizontal strip */}
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 12 }}>Worker Fleet</div>
+              {workers.length === 0 ? (
+                <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "24px", textAlign: "center", color: "var(--text-muted)", fontSize: 12 }}>
+                  <Server size={20} style={{ opacity: 0.15, display: "block", margin: "0 auto 8px" }} />
+                  No workers online
+                </div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+                  {workers.slice(0, 4).map(w => <WorkerCard key={w.id} worker={w} />)}
+                  {workers.length > 4 && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <button onClick={() => setSection("workers")} style={{ fontSize: 11, color: "#6366f1", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
                         +{workers.length - 4} more workers →
                       </button>
-                    )}
-                  </div>
-                )}
-              </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -3207,8 +3283,8 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
             {workers.length === 0 ? (
               <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "64px", textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
                 <Server size={40} style={{ opacity: 0.12, display: "block", margin: "0 auto 16px" }} />
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>No workers registered</div>
-                <div style={{ fontSize: 11 }}>Start the render worker to see it appear here</div>
+                <div style={{ fontWeight: 700, marginBottom: 6, color: "var(--text-secondary)" }}>No workers online</div>
+                <div style={{ fontSize: 11 }}>Workers auto-register on startup — deploy a worker service to join the fleet</div>
               </div>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
@@ -3250,7 +3326,7 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
             </div>
 
             {/* Log stream */}
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#050510", fontFamily: "'SF Mono','Fira Code',monospace", fontSize: 11, padding: "8px 0" }}>
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "#040410", fontFamily: "'SF Mono','Fira Code',monospace", fontSize: 11, padding: "6px 0" }}>
               {filteredLogs.length === 0 ? (
                 <div style={{ padding: "64px 24px", textAlign: "center", color: "var(--text-muted)" }}>
                   <Terminal size={28} style={{ opacity: 0.12, display: "block", margin: "0 auto 10px" }} />
@@ -3262,11 +3338,21 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
                 const tsStr  = tsDate && !isNaN(tsDate.getTime())
                   ? tsDate.toLocaleTimeString("en", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })
                   : "";
+                const lvl    = entry.level ?? "info";
+                const lc     = levelColor(lvl);
+                const lvlLabel = lvl === "agent" ? "RUN" : lvl.toUpperCase().slice(0, 3);
                 return (
-                  <div key={entry.id ?? `${entry.ts}-${idx}`} style={{ display: "flex", gap: 10, padding: "2px 20px 3px", borderLeft: `2px solid ${levelColor(entry.level ?? "")}28`, marginBottom: 1 }}>
-                    <span style={{ fontSize: 9, color: "var(--text-muted)", flexShrink: 0, fontVariantNumeric: "tabular-nums", marginTop: 1 }}>{tsStr}</span>
-                    <span style={{ fontSize: 9, fontWeight: 700, color: "#6366f1", flexShrink: 0, minWidth: 100, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 1 }}>{entry.agent ?? ""}</span>
-                    <span style={{ color: levelColor(entry.level ?? ""), wordBreak: "break-word", lineHeight: 1.5, flex: 1 }}>{stripSlugPrefix(entry.message)}</span>
+                  <div key={entry.id ?? `${entry.ts}-${idx}`} style={{ display: "flex", alignItems: "baseline", gap: 0, padding: "1px 0", transition: "background 0.08s" }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.018)")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <span style={{ fontSize: 9, color: "rgba(255,255,255,0.2)", flexShrink: 0, fontVariantNumeric: "tabular-nums", paddingLeft: 16, paddingRight: 10, minWidth: 64 }}>{tsStr}</span>
+                    <span style={{
+                      fontSize: 8, fontWeight: 700, flexShrink: 0, width: 26, textAlign: "center", letterSpacing: "0.3px",
+                      color: lc, opacity: 0.85,
+                    }}>{lvlLabel}</span>
+                    <span style={{ fontSize: 9, color: "#6366f1", flexShrink: 0, minWidth: 96, maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 8, paddingLeft: 4 }}>{entry.agent ?? ""}</span>
+                    <span style={{ color: lc === "var(--text-secondary)" ? "rgba(255,255,255,0.55)" : lc, wordBreak: "break-word", lineHeight: 1.6, flex: 1, paddingRight: 16 }}>{stripSlugPrefix(entry.message)}</span>
                   </div>
                 );
               })}
