@@ -214,7 +214,27 @@ async function startup(): Promise<void> {
   });
 
   worker.on("completed", (job) => {
-    console.log(`[worker] Job done: ${job.id}`);
+    const pipelineId = job.id ?? job.data.pipelineId;
+    console.log(`[worker] Job done: ${pipelineId}`);
+
+    // Stage timing summary — logged at completion for validation + ops visibility
+    getDb()
+      .query<{ stage_name: string; status: string; duration_ms: number | null }>(
+        `SELECT stage_name, status, duration_ms
+           FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY started_at NULLS LAST`,
+        [pipelineId]
+      )
+      .then(({ rows }) => {
+        const total = rows.reduce((s, r) => s + (r.duration_ms ?? 0), 0);
+        console.log(`[worker] Stage summary ${pipelineId} (${total}ms total):`);
+        for (const r of rows) {
+          const icon = r.status === "done" ? "✓" : r.status === "skipped" ? "–" : "✗";
+          const dur  = r.duration_ms != null ? `${r.duration_ms}ms` : "—";
+          console.log(`[worker]   ${icon} ${r.stage_name.padEnd(28)} ${dur}`);
+        }
+      })
+      .catch(() => {});
+
     getDb()
       .query(`UPDATE workers SET renders_this_session = renders_this_session + 1 WHERE id = $1`, [WORKER_ID])
       .catch(() => {});
