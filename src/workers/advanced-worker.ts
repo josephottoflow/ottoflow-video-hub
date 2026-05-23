@@ -28,7 +28,7 @@ import type { AdvancedPipelineJob } from "../lib/queue/advanced";
 const CONCURRENCY    = parseInt(process.env.WORKER_CONCURRENCY ?? "1", 10);
 const GIT_SHA        = process.env.GIT_SHA ?? "dev";
 const WORKER_ID      = `${os.hostname()}:${process.pid}`;
-const HEARTBEAT_MS   = 30_000;
+const HEARTBEAT_MS   = 180_000; // 3 min — was 30s; reduces idle Redis traffic by 83%
 
 // ── Worker registration ───────────────────────────────────────────────────────
 
