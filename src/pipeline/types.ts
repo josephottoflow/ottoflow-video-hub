@@ -1,6 +1,6 @@
 // Pipeline Engine — shared type contracts
 
-export type PipelineStatus = "pending" | "queued" | "running" | "done" | "failed" | "cancelled" | "timed_out";
+export type PipelineStatus = "pending" | "queued" | "running" | "done" | "failed" | "cancelled" | "timed_out" | "dead";
 export type StageStatus    = "pending" | "running" | "done" | "failed" | "skipped" | "cancelled";
 export type WorkerStatus   = "online" | "draining" | "offline" | "crashed";
 export type Tier           = "basic" | "advanced";

@@ -403,6 +403,61 @@ export async function getStoryboardByJob(jobId: string): Promise<DbStoryboard | 
   return rows[0] ?? null;
 }
 
+// ── Advanced pipeline schema migrations (idempotent, safe on each worker boot) ─
+
+export async function runAdvancedMigrations(): Promise<void> {
+  const db = getDb();
+
+  // Column additions — each idempotent
+  await db.query(`
+    ALTER TABLE workers ADD COLUMN IF NOT EXISTS memory_rss_mb         INT;
+    ALTER TABLE workers ADD COLUMN IF NOT EXISTS memory_heap_mb         INT;
+    ALTER TABLE workers ADD COLUMN IF NOT EXISTS renders_this_session   INT NOT NULL DEFAULT 0;
+    ALTER TABLE pipelines ADD COLUMN IF NOT EXISTS retry_count          INT NOT NULL DEFAULT 0;
+    CREATE TABLE IF NOT EXISTS queue_snapshots (
+      id          BIGSERIAL   PRIMARY KEY,
+      captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      waiting     INT,
+      active      INT,
+      delayed     INT,
+      done_24h    INT,
+      failed_24h  INT
+    );
+    CREATE INDEX IF NOT EXISTS queue_snapshots_captured_at_idx ON queue_snapshots(captured_at DESC);
+  `);
+
+  // Extend pipelines status constraint to include 'dead' — done separately
+  // because DO blocks don't compose well in multi-statement query strings.
+  await db.query(`
+    DO $$
+    DECLARE
+      v_conname  TEXT;
+      v_condef   TEXT;
+    BEGIN
+      SELECT c.conname, pg_get_constraintdef(c.oid)
+      INTO   v_conname, v_condef
+      FROM   pg_constraint c
+      WHERE  c.conrelid = 'pipelines'::regclass
+        AND  c.contype  = 'c'
+        AND  pg_get_constraintdef(c.oid) LIKE '%status IN%'
+      LIMIT  1;
+
+      IF v_condef LIKE '%dead%' THEN
+        RETURN;
+      END IF;
+
+      IF v_conname IS NOT NULL THEN
+        EXECUTE format('ALTER TABLE pipelines DROP CONSTRAINT %I', v_conname);
+      END IF;
+
+      ALTER TABLE pipelines
+        ADD CONSTRAINT pipelines_status_check
+        CHECK (status IN ('pending','queued','running','done','failed','cancelled','timed_out','dead'));
+    END;
+    $$;
+  `);
+}
+
 // ── Worker heartbeat ───────────────────────────────────────────────────────────
 
 export async function touchWorkerHeartbeat(workerHost?: string): Promise<void> {

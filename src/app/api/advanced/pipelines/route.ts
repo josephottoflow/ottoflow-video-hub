@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
          p.id, p.status, p.tier, p.topic, p.style,
          p.render_variant, p.hook_style, p.template,
          p.current_stage, p.progress_pct, p.error,
-         p.artifacts, p.priority, p.row_index,
+         p.artifacts, p.priority, p.row_index, p.retry_count,
          p.queued_at, p.started_at, p.completed_at, p.worker_id,
          EXTRACT(EPOCH FROM (COALESCE(p.completed_at, NOW()) - p.started_at))::int AS duration_s
        FROM pipelines p

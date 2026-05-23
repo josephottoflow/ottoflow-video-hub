@@ -17,7 +17,7 @@ import "dotenv/config";
 import * as http from "http";
 import * as os   from "os";
 import { Worker, Job } from "bullmq";
-import { getDb } from "../lib/db";
+import { getDb, runAdvancedMigrations } from "../lib/db";
 import { advancedRedis, ADVANCED_QUEUE, getQueueStats } from "../lib/queue/advanced";
 import { runPipeline } from "../pipeline/engine";
 import { publishWorkerHeartbeat, publishQueueStats } from "../lib/redis/pubsub";
@@ -46,13 +46,42 @@ async function registerWorker(): Promise<void> {
 }
 
 async function touchHeartbeat(): Promise<void> {
+  const mem  = process.memoryUsage();
+  const rss  = Math.round(mem.rss       / 1024 / 1024);
+  const heap = Math.round(mem.heapUsed  / 1024 / 1024);
+
   await getDb().query(
-    `UPDATE workers SET last_seen = now() WHERE id = $1`,
-    [WORKER_ID]
+    `UPDATE workers SET last_seen = now(), memory_rss_mb = $2, memory_heap_mb = $3 WHERE id = $1`,
+    [WORKER_ID, rss, heap]
   );
+
   const stats = await getQueueStats().catch(() => ({ waiting: 0, active: 0, delayed: 0 }));
-  await publishWorkerHeartbeat(WORKER_ID, { concurrency: CONCURRENCY, version: GIT_SHA });
+  await publishWorkerHeartbeat(WORKER_ID, { concurrency: CONCURRENCY, version: GIT_SHA, memRssMb: rss, memHeapMb: heap });
   await publishQueueStats(stats);
+
+  // Snapshot queue depth for analytics
+  try {
+    const db = getDb();
+    const { rows: [counts] } = await db.query<{ done_24h: string; failed_24h: string }>(
+      `SELECT
+         COUNT(*) FILTER (WHERE status = 'done'   AND completed_at > NOW() - INTERVAL '24 hours') AS done_24h,
+         COUNT(*) FILTER (WHERE status = 'failed' AND completed_at > NOW() - INTERVAL '24 hours') AS failed_24h
+       FROM pipelines`
+    );
+    await db.query(
+      `INSERT INTO queue_snapshots (waiting, active, delayed, done_24h, failed_24h)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [stats.waiting, stats.active, stats.delayed,
+       parseInt(counts?.done_24h ?? "0", 10), parseInt(counts?.failed_24h ?? "0", 10)]
+    );
+    // Prune snapshots older than 7 days
+    await db.query(`DELETE FROM queue_snapshots WHERE captured_at < NOW() - INTERVAL '7 days'`);
+  } catch { /* non-fatal */ }
+
+  // Alert if memory crosses 1 GB
+  if (rss > 1024) {
+    console.warn(`[worker] HIGH MEMORY WARNING: RSS=${rss}MB — consider restart`);
+  }
 }
 
 // ── Dead worker recovery ──────────────────────────────────────────────────────
@@ -140,6 +169,9 @@ async function processJob(job: Job<AdvancedPipelineJob>): Promise<void> {
 
 async function startup(): Promise<void> {
   startHealthServer();
+  await runAdvancedMigrations().catch((e) =>
+    console.warn("[worker] Advanced migrations skipped:", e.message)
+  );
   await registerWorker();
   await recoverStuckPipelines();
 
@@ -164,7 +196,12 @@ async function startup(): Promise<void> {
     lockRenewTime: 120_000,     // renew every 2 min
   });
 
-  worker.on("completed", (job) => console.log(`[worker] Job done: ${job.id}`));
+  worker.on("completed", (job) => {
+    console.log(`[worker] Job done: ${job.id}`);
+    getDb()
+      .query(`UPDATE workers SET renders_this_session = renders_this_session + 1 WHERE id = $1`, [WORKER_ID])
+      .catch(() => {});
+  });
   worker.on("failed",    (job, err) => console.error(`[worker] Job failed: ${job?.id} — ${err.message}`));
   worker.on("error",     (err) => console.error(`[worker] Worker error:`, err.message));
 

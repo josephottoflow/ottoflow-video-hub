@@ -9,6 +9,7 @@ export async function GET() {
       SELECT
         w.id, w.status, w.tier, w.concurrency, w.version, w.hostname,
         w.started_at, w.last_seen,
+        w.memory_rss_mb, w.memory_heap_mb, w.renders_this_session,
         EXTRACT(EPOCH FROM (NOW() - w.last_seen))::int    AS heartbeat_age_s,
         EXTRACT(EPOCH FROM (NOW() - w.started_at))::int   AS uptime_s,
         p.id           AS pipeline_id,

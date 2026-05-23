@@ -120,6 +120,18 @@ export async function runPipeline({ pipelineId, workerId, config }: RunPipelineI
       break;
     }
 
+    // Check DB for operator cancellation between stages
+    const { rows: [statusCheck] } = await db.query<{ status: string }>(
+      `SELECT status FROM pipelines WHERE id = $1`,
+      [pipelineId]
+    );
+    if (statusCheck?.status === "cancelled" || statusCheck?.status === "dead") {
+      failed      = true;
+      failedError = "Pipeline cancelled by operator";
+      hardAbort.abort(new Error(failedError));
+      break;
+    }
+
     const def = STAGE_REGISTRY[stageName];
     if (!def) {
       ctx.log(`[${stageName}] not in registry — skipping`);
@@ -193,19 +205,28 @@ export async function runPipeline({ pipelineId, workerId, config }: RunPipelineI
   // ── Finalize pipeline ────────────────────────────────────────────────────────
   if (failed || hardAbort.signal.aborted) {
     const err = hardAbort.signal.aborted ? "Pipeline hard timeout (20m) exceeded" : failedError;
+    const isCancelled = failedError === "Pipeline cancelled by operator";
+
+    // Don't overwrite 'cancelled' status set by the cancel endpoint
     await db.query(
       `UPDATE pipelines
-         SET status       = 'failed',
-             error        = $1,
-             completed_at = now(),
-             duration_ms  = $2,
-             worker_id    = NULL,
-             locked_at    = NULL,
+         SET status        = CASE WHEN status = 'cancelled' THEN 'cancelled' ELSE $4 END,
+             error         = $1,
+             completed_at  = now(),
+             duration_ms   = $2,
+             worker_id     = NULL,
+             locked_at     = NULL,
              current_stage = NULL
        WHERE id = $3`,
-      [err, durationMs, pipelineId]
+      [err, durationMs, pipelineId, isCancelled ? "cancelled" : "failed"]
     );
-    await emitEvent({ type: "pipeline_failed", pipelineId, error: err, workerId, ts: new Date().toISOString() });
+    await emitEvent({
+      type:      isCancelled ? "pipeline_cancelled" : "pipeline_failed",
+      pipelineId,
+      error:     err,
+      workerId,
+      ts:        new Date().toISOString(),
+    });
   } else {
     await db.query(
       `UPDATE pipelines

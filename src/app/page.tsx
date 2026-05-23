@@ -59,6 +59,7 @@ interface Pipeline {
   completed_at: string | null;
   worker_id: string | null;
   duration_s: number | null;
+  retry_count: number;
   stages: PipelineStage[];
 }
 
@@ -73,6 +74,9 @@ interface Worker {
   last_seen: string;
   heartbeat_age_s: number;
   uptime_s: number;
+  memory_rss_mb: number | null;
+  memory_heap_mb: number | null;
+  renders_this_session: number | null;
   pipeline_id: string | null;
   pipeline_topic: string | null;
   current_stage: string | null;
@@ -183,9 +187,11 @@ function getStageColor(status: string): string {
 }
 
 function pipelineStatusColor(status: string): string {
-  if (status === "done")    return "#10b981";
-  if (status === "running") return "#6366f1";
-  if (status === "failed")  return "#f43f5e";
+  if (status === "done")      return "#10b981";
+  if (status === "running")   return "#6366f1";
+  if (status === "failed")    return "#f43f5e";
+  if (status === "dead")      return "#7c3aed";
+  if (status === "cancelled" || status === "timed_out") return "#f59e0b";
   if (status === "queued" || status === "pending") return "#f59e0b";
   return "rgba(255,255,255,0.3)";
 }
@@ -2496,14 +2502,43 @@ function StageDots({ stages, stageStatuses, compact = true }: {
   );
 }
 
-function PipelineRow({ pipeline, isExpanded, onToggle, liveStageStatuses }: {
+function PipelineRow({ pipeline, isExpanded, onToggle, liveStageStatuses, onRefresh }: {
   pipeline: Pipeline;
   isExpanded: boolean;
   onToggle: () => void;
   liveStageStatuses?: Record<string, string>;
+  onRefresh?: () => void;
 }) {
+  const [actioning, setActioning] = useState(false);
   const stColor = pipelineStatusColor(pipeline.status);
   const stageStatuses = pipeline.status === "running" ? liveStageStatuses : undefined;
+  const canCancel = pipeline.status === "queued" || pipeline.status === "running" || pipeline.status === "pending";
+  const canRetry  = ["failed", "cancelled", "timed_out", "dead"].includes(pipeline.status);
+
+  async function handleCancel(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm(`Cancel pipeline: ${pipeline.topic.slice(0, 60)}?`)) return;
+    setActioning(true);
+    try {
+      const res = await fetch(`/api/advanced/pipeline/${pipeline.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) toast.error(data.error ?? "Cancel failed");
+      else { toast.success(data.message ?? "Cancelled"); onRefresh?.(); }
+    } catch { toast.error("Network error"); }
+    finally { setActioning(false); }
+  }
+
+  async function handleRetry(e: React.MouseEvent) {
+    e.stopPropagation();
+    setActioning(true);
+    try {
+      const res = await fetch(`/api/advanced/pipeline/${pipeline.id}/retry`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const data = await res.json();
+      if (!res.ok) toast.error(data.error ?? "Retry failed");
+      else { toast.success(`Re-queued (#${data.retryCount})`); onRefresh?.(); }
+    } catch { toast.error("Network error"); }
+    finally { setActioning(false); }
+  }
 
   return (
     <div style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
@@ -2532,6 +2567,7 @@ function PipelineRow({ pipeline, isExpanded, onToggle, liveStageStatuses }: {
             <span>{pipeline.style}</span>
             {pipeline.render_variant && <span>· {pipeline.render_variant}</span>}
             {pipeline.current_stage && pipeline.status === "running" && <span style={{ color: "#a78bfa" }}>· {pipeline.current_stage}</span>}
+            {pipeline.retry_count > 0 && <span style={{ color: "#f59e0b" }}>· retry #{pipeline.retry_count}</span>}
           </div>
         </div>
 
@@ -2565,6 +2601,32 @@ function PipelineRow({ pipeline, isExpanded, onToggle, liveStageStatuses }: {
           </div>
         )}
 
+        {/* Action buttons — cancel or retry */}
+        {(canCancel || canRetry) && (
+          <div style={{ display: "flex", gap: 4, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+            {canCancel && (
+              <button
+                onClick={handleCancel}
+                disabled={actioning}
+                title="Cancel pipeline"
+                style={{ padding: "3px 7px", borderRadius: 5, border: "1px solid rgba(244,63,94,0.3)", background: "rgba(244,63,94,0.08)", color: "#f43f5e", fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}
+              >
+                <X size={9} strokeWidth={2.5} />{actioning ? "…" : "Stop"}
+              </button>
+            )}
+            {canRetry && (
+              <button
+                onClick={handleRetry}
+                disabled={actioning}
+                title="Retry from beginning"
+                style={{ padding: "3px 7px", borderRadius: 5, border: "1px solid rgba(99,102,241,0.3)", background: "rgba(99,102,241,0.08)", color: "#a78bfa", fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}
+              >
+                <RefreshCw size={9} strokeWidth={2.5} />{actioning ? "…" : "Retry"}
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Chevron */}
         {isExpanded ? <ChevronUp size={13} color="var(--text-muted)" strokeWidth={2} /> : <ChevronDown size={13} color="var(--text-muted)" strokeWidth={2} />}
       </div>
@@ -2591,6 +2653,44 @@ function PipelineRow({ pipeline, isExpanded, onToggle, liveStageStatuses }: {
               ))}
             </div>
           )}
+
+          {/* Per-stage retry picker */}
+          {canRetry && pipeline.stages.length > 0 && (
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+              <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", marginBottom: 6 }}>Retry from stage</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {pipeline.stages.map(s => (
+                  <button
+                    key={s.stage_name}
+                    disabled={actioning}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      setActioning(true);
+                      try {
+                        const res = await fetch(`/api/advanced/pipeline/${pipeline.id}/retry`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ fromStage: s.stage_name }),
+                        });
+                        const data = await res.json();
+                        if (!res.ok) toast.error(data.error ?? "Retry failed");
+                        else { toast.success(`Retry from ${s.stage_name} (#${data.retryCount})`); onRefresh?.(); }
+                      } catch { toast.error("Network error"); }
+                      finally { setActioning(false); }
+                    }}
+                    style={{
+                      padding: "2px 8px", borderRadius: 4, fontSize: 9, fontFamily: "monospace",
+                      border: `1px solid ${getStageColor(s.status)}44`,
+                      background: `${getStageColor(s.status)}11`,
+                      color: getStageColor(s.status), cursor: "pointer", fontWeight: 600,
+                    }}
+                  >
+                    {s.stage_name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -2601,6 +2701,12 @@ function WorkerCard({ worker }: { worker: Worker }) {
   const isOnline   = worker.status === "online";
   const isDraining = worker.status === "draining";
   const dotColor   = isOnline ? "#10b981" : isDraining ? "#f59e0b" : "rgba(255,255,255,0.2)";
+
+  const rss = worker.memory_rss_mb;
+  const memColor = rss == null ? "var(--text-secondary)"
+    : rss > 900 ? "#f43f5e"
+    : rss > 600 ? "#f59e0b"
+    : "#10b981";
 
   return (
     <div style={{
@@ -2633,10 +2739,31 @@ function WorkerCard({ worker }: { worker: Worker }) {
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 3 }}>Concurrency</div>
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace" }}>{worker.concurrency}</div>
+          <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 3 }}>Renders</div>
+          <div style={{ fontSize: 11, color: "var(--text-secondary)", fontFamily: "monospace" }}>{worker.renders_this_session ?? 0} session</div>
         </div>
       </div>
+
+      {/* Memory bar */}
+      {rss != null && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+            <span style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>Memory (RSS)</span>
+            <span style={{ fontSize: 10, fontFamily: "monospace", color: memColor, fontWeight: 700 }}>{rss} MB</span>
+          </div>
+          <div style={{ height: 3, background: "rgba(255,255,255,0.08)", borderRadius: 3, overflow: "hidden" }}>
+            <div style={{
+              height: "100%",
+              width: `${Math.min(rss / 12, 100)}%`,
+              background: rss > 900 ? "#f43f5e" : rss > 600 ? "#f59e0b" : "linear-gradient(90deg,#10b981,#22d3ee)",
+              borderRadius: 3, transition: "width 1s",
+            }} />
+          </div>
+          <div style={{ fontSize: 9, color: "var(--text-muted)", marginTop: 2 }}>
+            heap {worker.memory_heap_mb ?? "—"} MB · limit ~1200 MB
+          </div>
+        </div>
+      )}
 
       {worker.pipeline_topic && (
         <div style={{ marginTop: 12, padding: "8px 10px", borderRadius: 8, background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.15)" }}>
@@ -2975,7 +3102,8 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
                   ) : pipelines.slice(0, 8).map(p => (
                     <PipelineRow key={p.id} pipeline={p} isExpanded={expandedPipeline === p.id}
                       onToggle={() => setExpandedPipeline(prev => prev === p.id ? null : p.id)}
-                      liveStageStatuses={p.id === activePipelineId ? stageStatuses : undefined} />
+                      liveStageStatuses={p.id === activePipelineId ? stageStatuses : undefined}
+                      onRefresh={fetchPipelines} />
                   ))}
                 </div>
                 {pipelines.length > 8 && (
@@ -3017,7 +3145,7 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
                 <p style={{ fontSize: 12, color: "var(--text-muted)" }}>{pipelines.length} runs · sorted by queue time</p>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
-                {["all","running","done","failed","queued"].map(f => (
+                {["all","running","done","failed","cancelled","dead","queued"].map(f => (
                   <button key={f} onClick={() => setPipeFilter(f)} style={{
                     padding: "5px 13px", borderRadius: 20, border: `1px solid ${pipeFilter === f ? "rgba(99,102,241,0.4)" : "rgba(255,255,255,0.08)"}`,
                     background: pipeFilter === f ? "rgba(99,102,241,0.12)" : "transparent",
@@ -3059,6 +3187,7 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
                     isExpanded={expandedPipeline === p.id}
                     onToggle={() => setExpandedPipeline(prev => prev === p.id ? null : p.id)}
                     liveStageStatuses={p.id === activePipelineId ? stageStatuses : undefined}
+                    onRefresh={fetchPipelines}
                   />
                 ))
               )}
