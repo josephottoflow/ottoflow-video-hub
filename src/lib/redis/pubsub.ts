@@ -14,39 +14,37 @@
 
 import IORedis, { type RedisOptions } from "ioredis";
 import type { PipelineEvent } from "../../pipeline/types";
+import { getAdvancedRedis } from "../queue/advanced";
 
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379";
 
-const REDIS_OPTS: RedisOptions = {
+// Subscriber connections need their own options (lazyConnect: false, dedicated connection per SSE client)
+const SUBSCRIBER_OPTS: RedisOptions = {
   maxRetriesPerRequest: null,
-  lazyConnect:          true,
+  lazyConnect:          false,
   enableReadyCheck:     false,
   keepAlive:            10_000,
   connectTimeout:       10_000,
   retryStrategy:        (t) => Math.min(t * 500, 5_000),
 };
 
-// ── Publisher (singleton) ─────────────────────────────────────────────────────
-
-let _pub: IORedis | null = null;
-
-export function getPublisher(): IORedis {
-  if (!_pub) _pub = new IORedis(REDIS_URL, REDIS_OPTS);
-  return _pub;
-}
+// ── Publisher — reuses getAdvancedRedis() singleton (OPT-3) ───────────────────
+// PUBLISH is a normal command; it shares the existing advancedRedis connection
+// instead of opening a dedicated 3rd connection. BullMQ duplicates the connection
+// internally, so there is no interference between queue ops and PUBLISH calls.
 
 // ── Emit a pipeline event ─────────────────────────────────────────────────────
 
 export async function publishPipelineEvent(event: PipelineEvent): Promise<void> {
-  await getPublisher().publish(`pipeline:${event.pipelineId}`, JSON.stringify(event));
+  await getAdvancedRedis().publish(`pipeline:${event.pipelineId}`, JSON.stringify(event));
 }
 
 export async function publishWorkerHeartbeat(workerId: string, payload: object): Promise<void> {
-  await getPublisher().publish("workers", JSON.stringify({ type: "worker_heartbeat", workerId, ...payload, ts: new Date().toISOString() }));
+  await getAdvancedRedis().publish("workers", JSON.stringify({ type: "worker_heartbeat", workerId, ...payload, ts: new Date().toISOString() }));
 }
 
 export async function publishQueueStats(payload: object): Promise<void> {
-  await getPublisher().publish("queue:advanced", JSON.stringify({ type: "queue_stats", ...payload, ts: new Date().toISOString() }));
+  await getAdvancedRedis().publish("queue:advanced", JSON.stringify({ type: "queue_stats", ...payload, ts: new Date().toISOString() }));
 }
 
 // ── Subscribe (dedicated connection per SSE client) ───────────────────────────
@@ -68,7 +66,7 @@ export async function subscribe(
   onMessage:  MessageHandler,
   onError?:   (err: Error) => void
 ): Promise<() => Promise<void>> {
-  const sub = new IORedis(REDIS_URL, { ...REDIS_OPTS, lazyConnect: false });
+  const sub = new IORedis(REDIS_URL, SUBSCRIBER_OPTS);
 
   const channels: string[] = [];
   if (opts.pipelineIds?.length) {

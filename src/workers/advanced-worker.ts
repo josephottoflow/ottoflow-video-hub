@@ -18,7 +18,7 @@ import * as http from "http";
 import * as os   from "os";
 import { Worker, Job } from "bullmq";
 import { getDb, runAdvancedMigrations } from "../lib/db";
-import { getAdvancedRedis, ADVANCED_QUEUE, getQueueStats } from "../lib/queue/advanced";
+import { getAdvancedRedis, ADVANCED_QUEUE } from "../lib/queue/advanced";
 import { requireEnv } from "../lib/env";
 import { runPipeline } from "../pipeline/engine";
 import { publishWorkerHeartbeat, publishQueueStats } from "../lib/redis/pubsub";
@@ -56,28 +56,42 @@ async function touchHeartbeat(): Promise<void> {
     [WORKER_ID, rss, heap]
   );
 
-  const stats = await getQueueStats().catch(() => ({ waiting: 0, active: 0, delayed: 0 }));
-  await publishWorkerHeartbeat(WORKER_ID, { concurrency: CONCURRENCY, version: GIT_SHA, memRssMb: rss, memHeapMb: heap });
-  await publishQueueStats(stats);
-
-  // Snapshot queue depth for analytics
+  // Derive queue stats from DB — one extended query replaces 3 Redis ZCARD calls (OPT-2).
+  // `delayed` is always 0: the advanced pipeline does not use BullMQ delayed jobs.
+  let stats = { waiting: 0, active: 0, delayed: 0 };
   try {
     const db = getDb();
-    const { rows: [counts] } = await db.query<{ done_24h: string; failed_24h: string }>(
+    const { rows: [counts] } = await db.query<{
+      waiting:   string;
+      active:    string;
+      done_24h:  string;
+      failed_24h: string;
+    }>(
       `SELECT
+         COUNT(*) FILTER (WHERE status = 'queued')                                            AS waiting,
+         COUNT(*) FILTER (WHERE status = 'running')                                           AS active,
          COUNT(*) FILTER (WHERE status = 'done'   AND completed_at > NOW() - INTERVAL '24 hours') AS done_24h,
          COUNT(*) FILTER (WHERE status = 'failed' AND completed_at > NOW() - INTERVAL '24 hours') AS failed_24h
        FROM pipelines`
     );
+    stats = {
+      waiting: parseInt(counts?.waiting   ?? "0", 10),
+      active:  parseInt(counts?.active    ?? "0", 10),
+      delayed: 0,
+    };
     await db.query(
       `INSERT INTO queue_snapshots (waiting, active, delayed, done_24h, failed_24h)
        VALUES ($1, $2, $3, $4, $5)`,
-      [stats.waiting, stats.active, stats.delayed,
-       parseInt(counts?.done_24h ?? "0", 10), parseInt(counts?.failed_24h ?? "0", 10)]
+      [stats.waiting, stats.active, 0,
+       parseInt(counts?.done_24h   ?? "0", 10),
+       parseInt(counts?.failed_24h ?? "0", 10)]
     );
     // Prune snapshots older than 7 days
     await db.query(`DELETE FROM queue_snapshots WHERE captured_at < NOW() - INTERVAL '7 days'`);
-  } catch { /* non-fatal */ }
+  } catch { /* non-fatal — stats fall back to zero */ }
+
+  await publishWorkerHeartbeat(WORKER_ID, { concurrency: CONCURRENCY, version: GIT_SHA, memRssMb: rss, memHeapMb: heap });
+  await publishQueueStats(stats);
 
   // Alert if memory crosses 1 GB
   if (rss > 1024) {
