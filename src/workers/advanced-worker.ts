@@ -3,12 +3,12 @@
 // Lifecycle:
 //   1. Register in workers table (upsert)
 //   2. Recover stuck pipelines from dead workers
-//   3. Start BullMQ worker on "advanced:pipeline" queue
+//   3. Start BullMQ worker on "advanced-pipeline" queue
 //   4. Heartbeat every 30s → workers.last_seen + pub/sub broadcast
 //   5. SIGTERM → drain → mark offline → quit Redis
 //
 // Separation from basic worker:
-//   - Dedicated queue: "advanced:pipeline"
+//   - Dedicated queue: "advanced-pipeline"
 //   - Dedicated Redis connection (advancedRedis)
 //   - Dedicated DB table: workers
 //   - Does NOT share any state with render-worker.ts

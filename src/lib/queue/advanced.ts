@@ -1,7 +1,7 @@
 // Advanced pipeline queue — separate from the legacy basic "render" queue
 //
 // Design:
-//   - Queue name: "advanced:pipeline" (never conflicts with legacy queue)
+//   - Queue name: "advanced-pipeline" (colon banned by BullMQ — use dash)
 //   - Job ID = pipelineId (idempotent — prevents duplicate queuing)
 //   - Priority 1-10 (1=highest)
 //   - All pipeline state lives in Postgres — BullMQ is purely a trigger
@@ -22,7 +22,7 @@ export const advancedRedis = new IORedis(REDIS_URL, {
   retryStrategy:        (t) => Math.min(t * 500, 5_000),
 });
 
-export const ADVANCED_QUEUE = "advanced:pipeline";
+export const ADVANCED_QUEUE = "advanced-pipeline";
 
 export interface AdvancedPipelineJob {
   pipelineId: string;
