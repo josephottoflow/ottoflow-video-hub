@@ -2843,6 +2843,7 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
   const [logLevel,          setLogLevel]          = useState("all");
   const [pipeFilter,        setPipeFilter]        = useState("all");
   const [expandedPipeline,  setExpandedPipeline]  = useState<string | null>(null);
+  const [health,            setHealth]            = useState<{ db: boolean; redis: boolean; env: boolean } | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // Global SSE — reconnects when activePipelineId changes
@@ -2961,6 +2962,24 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
 
   // Scroll logs to bottom
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
+
+  // Health check (60s)
+  useEffect(() => {
+    const load = async () => {
+      const r = await fetch("/api/advanced/health").catch(() => null);
+      if (r) {
+        const d = await r.json().catch(() => null);
+        if (d?.checks) {
+          setHealth({
+            db:    d.checks.db?.ok    === true,
+            redis: d.checks.redis?.ok === true,
+            env:   d.checks.env?.ok   === true,
+          });
+        }
+      }
+    };
+    load(); const t = setInterval(load, 60_000); return () => clearInterval(t);
+  }, []);
 
   const renderRow = async (row: QueueRow) => {
     const tid = `adv-${row.rowIndex}`;
@@ -3093,8 +3112,33 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
           })}
         </nav>
 
+        {/* Infrastructure health strip */}
+        <div style={{ padding: "10px 12px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+          <div style={{ fontSize: 8, color: "rgba(255,255,255,0.2)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 7 }}>
+            Infra Health
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {([
+              { label: "DB",    ok: health?.db    },
+              { label: "Redis", ok: health?.redis },
+              { label: "Env",   ok: health?.env   },
+            ] as { label: string; ok: boolean | undefined }[]).map(({ label, ok }) => (
+              <div key={label} title={`${label}: ${ok == null ? "checking..." : ok ? "ok" : "error"}`} style={{
+                display: "flex", alignItems: "center", gap: 4, padding: "3px 7px",
+                borderRadius: 5, fontSize: 9, fontWeight: 700,
+                background: ok == null ? "rgba(255,255,255,0.04)" : ok ? "rgba(16,185,129,0.1)" : "rgba(244,63,94,0.1)",
+                border: `1px solid ${ok == null ? "rgba(255,255,255,0.07)" : ok ? "rgba(16,185,129,0.2)" : "rgba(244,63,94,0.25)"}`,
+                color: ok == null ? "rgba(255,255,255,0.25)" : ok ? "#10b981" : "#f43f5e",
+              }}>
+                <span style={{ width: 4, height: 4, borderRadius: "50%", background: "currentColor", flexShrink: 0 }} />
+                {label}
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Switch to Basic */}
-        <div style={{ padding: "12px 10px 16px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+        <div style={{ padding: "10px 10px 14px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
           <button onClick={onSwitchToBasic} style={{
             width: "100%", padding: "8px 12px", borderRadius: 7,
             border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)",
@@ -3104,7 +3148,7 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
             <LayoutDashboard size={12} strokeWidth={1.8} />
             Switch to Basic
           </button>
-          <div style={{ marginTop: 10, fontSize: 10, color: "var(--text-muted)", paddingLeft: 4 }}>
+          <div style={{ marginTop: 8, fontSize: 10, color: "var(--text-muted)", paddingLeft: 4 }}>
             <div style={{ fontWeight: 600, color: "var(--text-secondary)", fontSize: 10 }}>joseph@ottoflow.ai</div>
           </div>
         </div>

@@ -15,7 +15,7 @@ import * as http from "http";
 import * as fs   from "fs";
 import * as path from "path";
 import { Worker, Job } from "bullmq";
-import { redisConnection, RENDER_QUEUE, RenderJobData } from "../lib/queue";
+import { getRenderRedis, RENDER_QUEUE, RenderJobData } from "../lib/queue";
 import { PipelineOrchestrator }   from "../agents/pipeline/orchestrator";
 import { PipelineOrchestratorV2 } from "../agents/pipeline/orchestrator-v2";
 import { updateJobStatus, markStuckJobsError, getJob, touchWorkerHeartbeat, runMigrations, updateJobProgress } from "../lib/db";
@@ -70,7 +70,7 @@ function startStaticServer() {
 
 async function checkRedis(): Promise<void> {
   try {
-    await redisConnection.ping();
+    await getRenderRedis().ping();
     console.log("[worker] Redis connected ✓");
   } catch (err) {
     console.error("[worker] Cannot reach Redis:", err instanceof Error ? err.message : err);
@@ -205,8 +205,9 @@ async function startup() {
     );
   }, 30_000);
 
+  const renderRedis = getRenderRedis();
   const worker = new Worker<RenderJobData>(RENDER_QUEUE, processJob, {
-    connection:    redisConnection,
+    connection:    renderRedis,
     concurrency:   CONCURRENCY,
     lockDuration:  600_000,
     lockRenewTime: 120_000,
@@ -232,7 +233,7 @@ async function startup() {
     console.log("[worker] Shutting down gracefully...");
     clearInterval(heartbeatInterval);
     await worker.close();
-    await redisConnection.quit();
+    await renderRedis.quit();
     process.exit(0);
   }
 

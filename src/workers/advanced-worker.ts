@@ -18,7 +18,8 @@ import * as http from "http";
 import * as os   from "os";
 import { Worker, Job } from "bullmq";
 import { getDb, runAdvancedMigrations } from "../lib/db";
-import { advancedRedis, ADVANCED_QUEUE, getQueueStats } from "../lib/queue/advanced";
+import { getAdvancedRedis, ADVANCED_QUEUE, getQueueStats } from "../lib/queue/advanced";
+import { requireEnv } from "../lib/env";
 import { runPipeline } from "../pipeline/engine";
 import { publishWorkerHeartbeat, publishQueueStats } from "../lib/redis/pubsub";
 import { ensureBrowser } from "@remotion/renderer";
@@ -168,6 +169,7 @@ async function processJob(job: Job<AdvancedPipelineJob>): Promise<void> {
 // ── Startup ───────────────────────────────────────────────────────────────────
 
 async function startup(): Promise<void> {
+  requireEnv();   // exits with clear error if DATABASE_URL / REDIS_URL are missing
   startHealthServer();
   await runAdvancedMigrations().catch((e) =>
     console.warn("[worker] Advanced migrations skipped:", e.message)
@@ -189,6 +191,7 @@ async function startup(): Promise<void> {
   );
 
   // BullMQ worker
+  const advancedRedis = getAdvancedRedis();
   const worker = new Worker<AdvancedPipelineJob>(ADVANCED_QUEUE, processJob, {
     connection:    advancedRedis,
     concurrency:   CONCURRENCY,

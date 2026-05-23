@@ -1,17 +1,10 @@
-import { Queue } from "bullmq";
-import { redisConnection, RENDER_QUEUE } from "@/lib/queue";
+import { getRenderQueue } from "@/lib/queue";
 import { getWorkerHeartbeat, hasProcessingJob } from "@/lib/db";
-
-let _queue: Queue | null = null;
-function getQueue() {
-  if (!_queue) _queue = new Queue(RENDER_QUEUE, { connection: redisConnection });
-  return _queue;
-}
 
 export async function GET() {
   // Run all three checks in parallel — any one of them being true means the worker is online.
   const [bullResult, processingResult, heartbeatResult] = await Promise.allSettled([
-    getQueue().getWorkers(),
+    getRenderQueue().getWorkers(),
     hasProcessingJob(),
     getWorkerHeartbeat(),
   ]);

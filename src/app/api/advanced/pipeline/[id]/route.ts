@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "../../../../../lib/db";
-import { advancedQueue } from "../../../../../lib/queue/advanced";
+import { getAdvancedQueue } from "../../../../../lib/queue/advanced";
 import { emitEvent } from "../../../../../pipeline/events";
 
 export const dynamic = "force-dynamic";
@@ -42,7 +42,7 @@ export async function DELETE(
 
   // Try to remove the BullMQ job (succeeds if still waiting, no-op if running)
   try {
-    const job = await advancedQueue.getJob(id);
+    const job = await getAdvancedQueue().getJob(id);
     if (job) {
       const state = await job.getState();
       if (state === "waiting" || state === "delayed" || state === "prioritized") {

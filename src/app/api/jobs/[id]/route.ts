@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { renderQueue } from "@/lib/queue";
+import { getRenderQueue } from "@/lib/queue";
 
 export async function DELETE(
   _req: NextRequest,
@@ -31,7 +31,7 @@ export async function DELETE(
     const bullJobId = rows[0]?.bull_job_id;
     if (bullJobId) {
       try {
-        const bullJob = await renderQueue.getJob(bullJobId);
+        const bullJob = await getRenderQueue().getJob(bullJobId);
         await bullJob?.remove();
       } catch { /* non-fatal — job may have already completed */ }
     }

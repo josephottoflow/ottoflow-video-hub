@@ -8,7 +8,7 @@
 import { Queue } from "bullmq";
 import { getDb } from "@/lib/db";
 import { rSetStatus } from "@/lib/pipeline-redis";
-import { redisConnection, RENDER_QUEUE } from "@/lib/queue";
+import { getRenderRedis, RENDER_QUEUE } from "@/lib/queue";
 
 export async function POST() {
   try {
@@ -22,7 +22,7 @@ export async function POST() {
     );
 
     // 2. Drain BullMQ queue — removes all waiting jobs from Redis
-    const q = new Queue(RENDER_QUEUE, { connection: redisConnection });
+    const q = new Queue(RENDER_QUEUE, { connection: getRenderRedis() });
     await q.drain().catch(() => {});
     await q.clean(0, 100, "wait").catch(() => {});
     await q.clean(0, 100, "active").catch(() => {});
