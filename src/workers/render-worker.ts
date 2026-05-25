@@ -16,10 +16,12 @@ import * as fs   from "fs";
 import * as path from "path";
 import { Worker, Job } from "bullmq";
 import { getRenderRedis, RENDER_QUEUE, RenderJobData } from "../lib/queue";
+import { enqueueRender } from "../lib/queue";
 import { PipelineOrchestrator }   from "../agents/pipeline/orchestrator";
 import { PipelineOrchestratorV2 } from "../agents/pipeline/orchestrator-v2";
-import { updateJobStatus, markStuckJobsError, getJob, touchWorkerHeartbeat, runMigrations, updateJobProgress } from "../lib/db";
+import { updateJobStatus, markStuckJobsError, getJob, touchWorkerHeartbeat, runMigrations, updateJobProgress, createJob } from "../lib/db";
 import { ensureBrowser } from "@remotion/renderer";
+import { RenderAgent } from "../agents/render/render-agent";
 import { emitLog, inferAgent, inferLevel, setStatus, clearLogs, store } from "../lib/pipeline-store";
 
 const CONCURRENCY      = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
@@ -38,6 +40,8 @@ function startStaticServer() {
     ".webp": "image/webp", ".json": "application/json",
   };
 
+  const ADMIN_SECRET = process.env.NEXTAUTH_SECRET || "";
+
   const server = http.createServer((req, res) => {
     // Railway health check
     if (req.url === "/health" || req.url === "/") {
@@ -45,6 +49,39 @@ function startStaticServer() {
       res.end("ok");
       return;
     }
+
+    // Admin queue endpoint — POST /api/queue
+    if (req.method === "POST" && req.url === "/api/queue") {
+      const auth = req.headers["authorization"] || "";
+      if (!ADMIN_SECRET || auth !== `Bearer ${ADMIN_SECRET}`) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized" }));
+        return;
+      }
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", () => {
+        (async () => {
+          try {
+            const payload = JSON.parse(body) as {
+              rowIndex: number; topic: string; style?: string;
+              template?: string; version?: "v1" | "v2";
+            };
+            const { rowIndex, topic, style = "Educational", version } = payload;
+            const template = payload.template ?? await RenderAgent.selectTemplate(topic, style);
+            const job = await createJob(rowIndex, topic, template, { version: version ?? "v1" });
+            await enqueueRender({ rowIndex, template, topic, dbJobId: job.id });
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ success: true, jobId: job.id, template }));
+          } catch (e) {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }));
+          }
+        })();
+      });
+      return;
+    }
+
     const relPath = decodeURIComponent((req.url || "/").split("?")[0]);
     const filePath = path.join(publicDir, relPath);
     if (!filePath.startsWith(publicDir)) { res.writeHead(403); res.end(); return; }
