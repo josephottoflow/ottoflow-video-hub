@@ -23,16 +23,24 @@ export async function rSetStatus(status: string, topic = "", progress = 0): Prom
   });
 }
 
+// Throttle: emit info/agent/warning lines to Redis at most once per 2s.
+// Errors and successes always go through immediately.
+// This prevents the console.log override from flooding Upstash with 100-300
+// extra commands per render (each log line was 2 separate round-trips).
+let _lastLogMs = 0;
+const LOG_THROTTLE_MS = 2_000;
+
 export async function rPushLog(agent: string, message: string, level: string): Promise<void> {
-  const entry = JSON.stringify({
-    id:      Date.now(),
-    ts:      new Date().toISOString(),
-    agent,
-    message,
-    level,
-  });
-  await getRenderRedis().lpush(LOGS_KEY, entry);
-  await getRenderRedis().ltrim(LOGS_KEY, 0, 149); // keep last 150 entries
+  const now = Date.now();
+  if (level !== "error" && level !== "success" && now - _lastLogMs < LOG_THROTTLE_MS) return;
+  _lastLogMs = now;
+
+  const entry = JSON.stringify({ id: now, ts: new Date().toISOString(), agent, message, level });
+  // Single pipeline call — halves round-trips vs two separate awaits
+  await getRenderRedis().pipeline()
+    .lpush(LOGS_KEY, entry)
+    .ltrim(LOGS_KEY, 0, 149)
+    .exec();
 }
 
 export async function rGetStatus(): Promise<RedisStatus> {

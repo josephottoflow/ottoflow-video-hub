@@ -17,6 +17,7 @@ const REDIS_OPTS = {
   enableReadyCheck:     false,
   keepAlive:            10_000,
   connectTimeout:       10_000,
+  commandTimeout:       15_000,  // abort hung commands — prevents lock-renewal hangs on silent drops
   retryStrategy:        (t: number) => Math.min(t * 500, 5_000),
 } as const;
 

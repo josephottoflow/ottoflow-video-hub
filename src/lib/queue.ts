@@ -39,6 +39,7 @@ export function getRenderRedis(): IORedis {
         enableReadyCheck:     false,
         keepAlive:            10_000,
         connectTimeout:       10_000,
+        commandTimeout:       15_000,  // abort hung commands — prevents lock-renewal hangs on silent drops
         retryStrategy:        (times) => Math.min(times * 500, 5_000),
       }
     );

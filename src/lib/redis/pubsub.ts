@@ -25,6 +25,7 @@ const SUBSCRIBER_OPTS: RedisOptions = {
   enableReadyCheck:     false,
   keepAlive:            10_000,
   connectTimeout:       10_000,
+  commandTimeout:       15_000,
   retryStrategy:        (t) => Math.min(t * 500, 5_000),
 };
 
