@@ -167,7 +167,8 @@ export class PipelineOrchestrator {
     try {
       await this.sheets.updateStatus(row.rowIndex, "Processing");
       setStatus("running", row.topic, 5);
-      console.log(`\n[${slug}] Starting...`);
+      const port = process.env.PORT || "3000";
+      console.log(`\n[${slug}] Starting... | tempDir=${tempDir} | staticPort=${port} | ElevenLabs=${VoiceoverAgent.isAvailable()} | Pexels=${!!process.env.PEXELS_API_KEY}`);
 
       // Strip em-dashes and enforce human voice on pre-written scripts from the sheet
       if (row.script) row.script = sanitizeScript(row.script);
@@ -176,44 +177,44 @@ export class PipelineOrchestrator {
       if (row.hookC)  row.hookC  = sanitizeScript(row.hookC);
 
       // ── 1. Generate visual design + apply Ottoflow brand ────
+      let _t = Date.now();
       setStatus("running", row.topic, 10);
-      console.log(`[${slug}] Generating design spec...`);
+      console.log(`[TRACE][${slug}] Stage 1: design started`);
       const rawDesign = await this.designAgent.generateDesign(row);
       const design    = this.branding.applyBrand(rawDesign);
-      console.log(`[${slug}] Design: ${design.theme} theme / ${design.mood} mood — ${design.rationale}`);
-      console.log(`[${slug}] Branding: Ottoflow palette applied — ${design.brandColors.primary} / CTA: "${this.branding.getCta(row.style)}"`);
+      console.log(`[TRACE][${slug}] Stage 1: design done in ${Date.now()-_t}ms — theme=${design.theme} mood=${design.mood}`);
 
-      // ── 2. Derive Pexels query terms from topic/style ────────────────
-      setStatus("running", row.topic, 20);
-      console.log(`[${slug}] Building shot plan...`);
-
-      // ── 3. Select background music ───────────────────────────
+      // ── 2. Select background music ───────────────────────────
+      _t = Date.now();
       setStatus("running", row.topic, 30);
-      console.log(`[${slug}] Selecting background music...`);
+      console.log(`[TRACE][${slug}] Stage 2: music started`);
       const musicTrack = await this.music.selectTrack(row, design, slug, tempDir, musicVibe);
-      if (musicTrack) {
-        console.log(`[${slug}] Music: "${musicTrack.name}" by ${musicTrack.artist} (${musicTrack.duration}s)`);
-      }
+      console.log(`[TRACE][${slug}] Stage 2: music done in ${Date.now()-_t}ms — track=${musicTrack ? `"${musicTrack.name}"` : "none"}`);
 
-      // ── 4. Generate voiceover narration (ElevenLabs) ─────────────────
+      // ── 3. Generate voiceover narration (ElevenLabs) ─────────────────
+      _t = Date.now();
       setStatus("running", row.topic, 35);
       let voiceoverPath: string | undefined;
+      console.log(`[TRACE][${slug}] Stage 3: voiceover started — available=${VoiceoverAgent.isAvailable()} scriptLen=${row.script?.length ?? 0}`);
       if (VoiceoverAgent.isAvailable() && row.script) {
-        console.log(`[${slug}] Generating voiceover narration...`);
         voiceoverPath = await this.voiceover.generate(row.script, tempDir, row.voice) ?? undefined;
-        if (voiceoverPath) console.log(`[${slug}] Voiceover ready`);
       }
+      console.log(`[TRACE][${slug}] Stage 3: voiceover done in ${Date.now()-_t}ms — path=${voiceoverPath ?? "skipped"}`);
 
-      // ── 5. Fetch Pexels backgrounds ──────────────────────────────────
+      // ── 4. Fetch Pexels backgrounds ──────────────────────────────────
+      _t = Date.now();
       setStatus("running", row.topic, 40);
-      const primaryQuery = row.topic;
-      const backgrounds  = await this.fetchBackgrounds(primaryQuery, row.style, slug, [row.topic]);
-      console.log(`[${slug}] Backgrounds: ${backgrounds.photos.length} photos, ${backgrounds.videos.length} videos`);
+      console.log(`[TRACE][${slug}] Stage 4: Pexels fetch started — key=${!!process.env.PEXELS_API_KEY}`);
+      const backgrounds  = await this.fetchBackgrounds(row.topic, row.style, slug, [row.topic]);
+      console.log(`[TRACE][${slug}] Stage 4: Pexels done in ${Date.now()-_t}ms — photos=${backgrounds.photos.length} videos=${backgrounds.videos.length}`);
+      if (backgrounds.videos.length > 0) console.log(`[TRACE][${slug}] bg[0]=${backgrounds.videos[0]}`);
 
-      // ── 6. Build video data (design tokens + Claude prompt) ────────────
+      // ── 5. Build video data (design tokens + Claude prompt) ────────────
+      _t = Date.now();
       setStatus("running", row.topic, 50);
-      console.log(`[${slug}] Generating video structure with Claude...`);
+      console.log(`[TRACE][${slug}] Stage 5: video structure generation started`);
       const videoData = await this.promptEngine.generateFromContent(row, slug, backgrounds, "");
+      console.log(`[TRACE][${slug}] Stage 5: video structure done in ${Date.now()-_t}ms`);
 
       // Override brand colors with Ottoflow brand (via Design Agent → BrandingAgent)
       videoData.brandColors = {
@@ -235,36 +236,36 @@ export class PipelineOrchestrator {
         JSON.stringify(videoData, null, 2)
       );
 
-      // ── 7. Render ────────────────────────────────────────────
+      // ── 6. Render ────────────────────────────────────────────
+      _t = Date.now();
       setStatus("running", row.topic, 60);
       await this.sheets.updateStatus(row.rowIndex, "Rendering");
       const recentTemplates = await getLastTemplatesForTopic(row.topic);
       const template = templateOverride ?? await RenderAgent.selectTemplate(row.topic, row.style, recentTemplates);
-      console.log(`[${slug}] Rendering video (template: ${template})...`);
+      console.log(`[TRACE][${slug}] Stage 6: Remotion render started — template=${template} outputDir=${tempDir}`);
 
       const renderResult = await this.renderAgent.render(slug, videoData, tempDir, template);
       if (!renderResult.success) {
         throw new Error(`Render failed: ${renderResult.error}`);
       }
-      console.log(`[${slug}] Rendered in ${Math.round((renderResult.durationMs || 0) / 1000)}s`);
+      console.log(`[TRACE][${slug}] Stage 6: render done in ${Date.now()-_t}ms — size=${((renderResult.fileSizeBytes || 0) / 1024 / 1024).toFixed(1)}MB path=${renderResult.videoPath}`);
 
-      // ── 8. FFmpeg post-process: color grade + fade + music mix ─
+      // ── 7. FFmpeg post-process: color grade + fade + music mix ─
+      _t = Date.now();
       setStatus("running", row.topic, 72);
       let finalVideoPath = renderResult.videoPath!;
-      if (FFmpegAgent.isAvailable() && renderResult.videoPath) {
-        const audioLabel = voiceoverPath
-          ? `voiceover${musicTrack ? ` + music "${musicTrack.name}"` : ""}`
-          : musicTrack ? `music "${musicTrack.name}"` : "no audio";
-        console.log(`[${slug}] FFmpeg post-processing (${design.theme} grade, ${audioLabel})...`);
+      const ffAvail = FFmpegAgent.isAvailable();
+      console.log(`[TRACE][${slug}] Stage 7: FFmpeg started — available=${ffAvail} voiceover=${!!voiceoverPath} music=${!!musicTrack?.localPath}`);
+      if (ffAvail && renderResult.videoPath) {
         const ffResult = await this.ffmpeg.postProcess(renderResult.videoPath, design.theme, {
           voiceoverPath: voiceoverPath,
           musicPath:     musicTrack?.localPath,
         });
         if (ffResult.success) {
           finalVideoPath = ffResult.outputPath;
-          console.log(`[${slug}] FFmpeg done — ${((ffResult.fileSizeBytes || 0) / 1024 / 1024).toFixed(1)}MB`);
+          console.log(`[TRACE][${slug}] Stage 7: FFmpeg done in ${Date.now()-_t}ms — ${((ffResult.fileSizeBytes || 0) / 1024 / 1024).toFixed(1)}MB`);
         } else {
-          console.warn(`[${slug}] FFmpeg failed (${ffResult.error}), using raw render`);
+          console.warn(`[TRACE][${slug}] Stage 7: FFmpeg FAILED in ${Date.now()-_t}ms — ${ffResult.error} — falling back to raw render`);
         }
       }
 
@@ -343,9 +344,11 @@ export class PipelineOrchestrator {
       result = this.result(row.topic, slug, true, undefined, startedAt, startTime, outputLink, outputDir);
 
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
+      const msg   = err instanceof Error ? err.message : String(err);
+      const stack = err instanceof Error ? (err.stack ?? "") : "";
       await this.sheets.updateStatus(row.rowIndex, "Error", msg);
-      console.error(`[${slug}] Failed: ${msg}`);
+      console.error(`[${slug}] FAILED at ${Date.now() - startTime}ms: ${msg}`);
+      if (stack) console.error(`[${slug}] Stack: ${stack}`);
       result = this.result(row.topic, slug, false, msg, startedAt, startTime);
     } finally {
       // Clean up tempDir + public/content/{slug}/ — Pexels backgrounds (50-200MB each) accumulate fast
@@ -362,7 +365,11 @@ export class PipelineOrchestrator {
   // files downloaded after bundling. Using absolute localhost URLs lets Chrome fetch
   // directly from the running Next.js server, bypassing the stale bundle copy.
   private bgUrl(rel: string): string {
-    return `http://localhost:3000/${rel}`;
+    // Must match the port the static file server is actually listening on.
+    // render-worker.ts binds to process.env.PORT || "3000"; hardcoding 3000
+    // breaks background fetches on Railway where PORT is often 8080.
+    const port = process.env.PORT || "3000";
+    return `http://localhost:${port}/${rel}`;
   }
 
   private async fetchBackgrounds(

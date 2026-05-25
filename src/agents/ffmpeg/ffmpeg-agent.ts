@@ -270,7 +270,7 @@ export class FFmpegAgent {
     }
 
     try {
-      console.log(`[ffmpeg] Processing: ${path.basename(inputPath)} (theme: ${theme}, platform: ${platform}, CRF: ${crf})`);
+      console.log(`[ffmpeg] cmd: ${cmd}`);
       execSync(cmd, { stdio: "pipe", timeout: 300000 });
 
       if (!fs.existsSync(outputPath)) {
@@ -292,8 +292,14 @@ export class FFmpegAgent {
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown FFmpeg error";
-      console.error(`[ffmpeg] Error: ${msg}`);
-      return { success: false, inputPath, outputPath, error: msg };
+      // execSync with stdio:"pipe" puts the actual FFmpeg error in err.stderr (not err.message)
+      const raw    = (err as { stderr?: Buffer | string }).stderr;
+      const stderr = Buffer.isBuffer(raw) ? raw.toString("utf-8") : (raw ?? "");
+      // FFmpeg errors appear at the END of stderr — take last 3000 chars
+      const errDetail = stderr ? stderr.slice(-3000).trim() : msg;
+      console.error(`[ffmpeg] FAILED: ${msg}`);
+      if (stderr) console.error(`[ffmpeg] stderr:\n${errDetail}`);
+      return { success: false, inputPath, outputPath, error: errDetail || msg };
     }
   }
 

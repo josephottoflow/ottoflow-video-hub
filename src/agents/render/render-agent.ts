@@ -91,9 +91,11 @@ export class RenderAgent {
 
       // ── 1. Bundle (cached after first call) ──────────────
       const serveUrl = await getBundleUrl();
+      console.log(`[render] serveUrl=${serveUrl.slice(0, 80)} compositionId=${compositionId} outputPath=${outputPath}`);
 
       // ── 2. Select composition ─────────────────────────────
       const { selectComposition } = await import("@remotion/renderer");
+      console.log(`[render] Selecting composition "${compositionId}"...`);
       const composition = await selectComposition({
         serveUrl,
         id:          compositionId,
@@ -145,7 +147,9 @@ export class RenderAgent {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[render] Failed: ${message}`);
+      const stack   = error instanceof Error ? (error.stack ?? "") : "";
+      console.error(`[render] FAILED: ${message}`);
+      if (stack) console.error(`[render] Stack: ${stack}`);
       return { success: false, error: message };
     }
   }

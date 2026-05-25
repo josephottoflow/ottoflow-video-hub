@@ -123,14 +123,16 @@ export class PipelineOrchestratorV2 {
       setStatus("running", row.topic, 5);
 
       // ── Step 1: Generate dynamic storyboard (Gemini creative director) ──────
-      emitLog("V2-Orchestrator", `Building storyboard (variant: ${renderVariant ?? "problem-first"}, hook: ${hookStyle ?? "shock"})...`, "agent");
+      let _t = Date.now();
+      emitLog("V2-Orchestrator", `Building storyboard (variant: ${renderVariant ?? "problem-first"}, hook: ${hookStyle ?? "shock"}) | tempDir=${tempDir} | staticPort=${process.env.PORT || "3000"} | Veo=${VeoAgent.isAvailable()} | ElevenLabs=${!!process.env.ELEVENLABS_API_KEY} | R2=${isR2Available()}`, "agent");
       const sb: Storyboard = await this.storyboard.generate(
         row.topic, row.style,
         renderVariant ?? "problem-first",
         hookStyle     ?? "shock",
         row.script?.trim() || undefined   // seed Gemini with existing sheet script
       );
-      emitLog("V2-Orchestrator", `Storyboard: ${sb.scenes.length} scenes, ${(sb.totalFrames / 30).toFixed(1)}s, style=${sb.visualStyle}`, "success");
+      emitLog("V2-Orchestrator", `Storyboard done in ${Date.now()-_t}ms — ${sb.scenes.length} scenes, ${(sb.totalFrames / 30).toFixed(1)}s, style=${sb.visualStyle}`, "success");
+      _t = Date.now();
       setStatus("running", row.topic, 15);
 
       if (dbJobId) {
@@ -170,6 +172,7 @@ export class PipelineOrchestratorV2 {
       const clipUrlMap: Record<string, string> = {};
       const imageUrlMap: Record<string, string> = {};
 
+      const localPort = process.env.PORT || "3000";
       if (VeoAgent.isAvailable()) {
         emitLog("V2-Orchestrator", `Generating ${sb.scenes.length} Veo clips...`, "info");
         await Promise.all(sb.scenes.map(async (scene, i) => {
@@ -183,11 +186,13 @@ export class PipelineOrchestratorV2 {
               try { clipUrl = await uploadFileToR2(`clips/${slug}/${outFile}`, clipPath, "video/mp4"); } catch { /* fall through */ }
             }
             if (!clipUrl) {
+              // Relative paths don't resolve under Remotion's file:// serveUrl.
+              // Use absolute localhost URL so Chrome fetches from the static server.
               try { fs.copyFileSync(clipPath, path.join(publicContent, outFile)); } catch { /* skip */ }
-              clipUrl = `/content/${slug}/${outFile}`;
+              clipUrl = `http://localhost:${localPort}/content/${slug}/${outFile}`;
             }
             clipUrlMap[scene.id] = clipUrl;
-            emitLog("V2-Orchestrator", `Veo clip ${i + 1}/${sb.scenes.length} — ${scene.beat} (${veoDur}s)`, "success");
+            emitLog("V2-Orchestrator", `Veo clip ${i + 1}/${sb.scenes.length} — ${scene.beat} (${veoDur}s) → ${clipUrl}`, "success");
           } else {
             emitLog("V2-Orchestrator", `Veo scene ${scene.id} failed — will use Imagen3`, "warning");
           }
@@ -210,7 +215,7 @@ export class PipelineOrchestratorV2 {
               }
               if (!imgUrl) {
                 try { fs.copyFileSync(imgPath, path.join(publicContent, destFile)); } catch { /* skip */ }
-                imgUrl = `/content/${slug}/${destFile}`;
+                imgUrl = `http://localhost:${localPort}/content/${slug}/${destFile}`;
               }
               imageUrlMap[scene.id] = imgUrl;
             }
@@ -241,7 +246,7 @@ export class PipelineOrchestratorV2 {
               }
               if (!lipsyncUrl) {
                 try { fs.copyFileSync(lipsyncClip, path.join(publicContent, destFile)); } catch { /* ignore */ }
-                lipsyncUrl = `/content/${slug}/${destFile}`;
+                lipsyncUrl = `http://localhost:${localPort}/content/${slug}/${destFile}`;
               }
               clipUrlMap[insightScene.id] = lipsyncUrl;
               emitLog("V2-Orchestrator", "Talking head ready", "success");
@@ -285,11 +290,14 @@ export class PipelineOrchestratorV2 {
       await this.sheets.updateStatus(rowIndex, "Rendering");
       setStatus("running", row.topic, 65);
 
+      _t = Date.now();
+      emitLog("V2-Orchestrator", `Remotion render starting — composition=v2-ugc outputDir=${tempDir} scenes=${storyboardData.scenes.length} clipsReady=${Object.keys(clipUrlMap).length} imagesReady=${Object.keys(imageUrlMap).length}`, "info");
       const renderResult = await this.renderAgent.render(slug, videoData, tempDir, "v2-ugc");
       if (!renderResult.success || !renderResult.videoPath) {
         throw new Error(renderResult.error || "Render failed");
       }
-      emitLog("V2-Orchestrator", `Rendered — ${((renderResult.fileSizeBytes || 0) / 1024 / 1024).toFixed(1)}MB`, "success");
+      emitLog("V2-Orchestrator", `Rendered in ${Date.now()-_t}ms — ${((renderResult.fileSizeBytes || 0) / 1024 / 1024).toFixed(1)}MB path=${renderResult.videoPath}`, "success");
+      _t = Date.now();
       setStatus("running", row.topic, 78);
 
       const audioLabel = voicePath
@@ -364,10 +372,12 @@ export class PipelineOrchestratorV2 {
       };
 
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
+      const message = err instanceof Error ? err.message : String(err);
+      const stack   = err instanceof Error ? (err.stack ?? "") : "";
       await this.sheets.updateStatus(rowIndex, "Error", message);
       setStatus("error");
-      emitLog("V2-Orchestrator", `Fatal: ${message}`, "error");
+      emitLog("V2-Orchestrator", `FATAL at ${Date.now() - new Date(startedAt).getTime()}ms: ${message}`, "error");
+      if (stack) emitLog("V2-Orchestrator", `Stack: ${stack}`, "error");
       pipelineResult = {
         topic:   row.topic,
         slug,
