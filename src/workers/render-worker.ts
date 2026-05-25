@@ -76,7 +76,7 @@ async function checkRedis(): Promise<void> {
     console.log("[worker] Redis connected ✓");
   } catch (err) {
     console.error("[worker] Cannot reach Redis:", err instanceof Error ? err.message : err);
-    console.error("[worker] Check REDIS_URL in .env and ensure Upstash is reachable.");
+    console.error("[worker] Check REDIS_URL in .env — should point to Railway Redis (redis.railway.internal).");
     process.exit(1);
   }
 }

@@ -16,7 +16,7 @@
 
 import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db";
-import { getAdvancedRedis } from "../../../../lib/queue/advanced";
+import { getUpstashRedis } from "../../../../lib/redis/upstash";
 import { validateEnv } from "../../../../lib/env";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +41,7 @@ function isFresh(cache: CheckCache | null, ttlMs: number): boolean {
 async function checkRedis(): Promise<CheckCache> {
   if (isFresh(_redisCache, REDIS_CACHE_TTL_MS)) return _redisCache!;
   try {
-    await getAdvancedRedis().ping();
+    await getUpstashRedis().ping();
     _redisCache = { ok: true, cachedAt: Date.now() };
   } catch (err) {
     _redisCache = { ok: false, error: (err as Error).message ?? "unknown", cachedAt: Date.now() };

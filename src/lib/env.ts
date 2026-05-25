@@ -12,7 +12,8 @@ interface EnvVar {
 
 const ENV_VARS: EnvVar[] = [
   { key: "DATABASE_URL",          required: true,  desc: "Neon PostgreSQL connection string" },
-  { key: "REDIS_URL",             required: true,  desc: "Upstash Redis connection string" },
+  { key: "REDIS_URL",             required: true,  desc: "Railway Redis — BullMQ queue and lock operations (worker-internal, private network)" },
+  { key: "UPSTASH_URL",          required: false, desc: "Upstash Redis — status/logs/pubsub (public, Vercel-accessible); falls back to REDIS_URL if unset" },
   { key: "ANTHROPIC_API_KEY",     required: false, desc: "Claude API — scriptwriter / topic agents" },
   { key: "GEMINI_API_KEY",        required: false, desc: "Gemini — primary AI provider" },
   { key: "ELEVENLABS_API_KEY",    required: false, desc: "ElevenLabs TTS voiceover" },
