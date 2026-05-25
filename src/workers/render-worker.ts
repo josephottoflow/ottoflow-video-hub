@@ -22,7 +22,9 @@ import { updateJobStatus, markStuckJobsError, getJob, touchWorkerHeartbeat, runM
 import { ensureBrowser } from "@remotion/renderer";
 import { emitLog, inferAgent, inferLevel, setStatus, clearLogs, store } from "../lib/pipeline-store";
 
-const CONCURRENCY = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
+const CONCURRENCY      = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
+const HEARTBEAT_MS     = 180_000;   // 3 min — matches advanced worker; reduces idle Redis commands
+const OOM_RSS_LIMIT_MB = 1_400;     // reject new jobs above this threshold and schedule restart
 
 // Serve public/ on localhost:3000 so Remotion Chrome can fetch background files.
 // Falls back silently if Next.js dev server already holds the port.
@@ -79,11 +81,49 @@ async function checkRedis(): Promise<void> {
   }
 }
 
+// Purge temp dirs older than MAX_TEMP_AGE_MS on startup + after each render.
+// Prevents disk exhaustion from accumulated failed render artifacts.
+const TEMP_DIR_PATH    = path.resolve(process.env.TEMP_DIR ?? "./temp");
+const OUT_DIR_PATH     = path.resolve(process.env.OUTPUT_DIR ?? "./outputs");
+const CONTENT_DIR_PATH = path.resolve("public", "content");
+const MAX_TEMP_AGE_MS  = 24 * 60 * 60 * 1_000; // 24 hours
+
+function purgeOldWorkDirs(): void {
+  for (const base of [TEMP_DIR_PATH, OUT_DIR_PATH, CONTENT_DIR_PATH]) {
+    try {
+      if (!fs.existsSync(base)) continue;
+      const cutoff = Date.now() - MAX_TEMP_AGE_MS;
+      for (const entry of fs.readdirSync(base, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const full = path.join(base, entry.name);
+        try {
+          const { mtimeMs } = fs.statSync(full);
+          if (mtimeMs < cutoff) {
+            fs.rmSync(full, { recursive: true, force: true });
+            console.log(`[worker] Purged stale dir: ${full}`);
+          }
+        } catch { /* skip undeletable entries */ }
+      }
+    } catch { /* non-fatal */ }
+  }
+}
+
 async function processJob(job: Job<RenderJobData>): Promise<void> {
   const { rowIndex, template, topic, dbJobId, version, renderVariant, hookStyle, musicVibe } = job.data;
 
+  // OOM guard — reject job if RSS is already dangerously high
+  const rssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
+  if (rssMb > OOM_RSS_LIMIT_MB) {
+    console.error(`[worker] OOM guard: RSS=${rssMb}MB > ${OOM_RSS_LIMIT_MB}MB — rejecting job ${dbJobId} and restarting`);
+    // Throw so BullMQ marks the job failed and Railway restarts the container
+    throw new Error(`Worker OOM guard triggered (RSS=${rssMb}MB) — job will be retried after restart`);
+  }
+
+  // Routing: v2-ugc template implies v2 orchestrator even if version field is absent
+  const effectiveVersion = version ?? (template === "v2-ugc" ? "v2" : "v1");
+
   console.log(`\n[worker] ── Job ${dbJobId} ──`);
-  console.log(`[worker] Topic: ${topic} | Template: ${template} | Version: ${version ?? "v1"} | Variant: ${renderVariant ?? "default"} | Row: ${rowIndex}${musicVibe ? ` | Vibe: ${musicVibe}` : ""}`);
+  console.log(`[worker] Topic: ${topic} | Template: ${template} | Version: ${effectiveVersion} | Variant: ${renderVariant ?? "default"} | Row: ${rowIndex}${musicVibe ? ` | Vibe: ${musicVibe}` : ""} | RSS: ${rssMb}MB`);
 
   // Check if this job was killed via the UI before we start any work
   try {
@@ -112,7 +152,7 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
   const startTime = Date.now();
   let result;
   try {
-    result = version === "v2"
+    result = effectiveVersion === "v2"
       ? await new PipelineOrchestratorV2().processSingleByRowIndex(rowIndex, renderVariant as any, hookStyle as any, dbJobId, musicVibe)
       : await new PipelineOrchestrator().processSingleByRowIndex(rowIndex, template, renderVariant as any, hookStyle as any, dbJobId, musicVibe);
   } catch (err) {
@@ -130,6 +170,9 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
 
   clearInterval(progressInterval);
   const durationMs = Date.now() - startTime;
+
+  // Purge stale temp dirs after every render (belt-and-suspenders alongside the finally blocks)
+  setImmediate(() => purgeOldWorkDirs());
 
   if (result.success) {
     setStatus("done");
@@ -196,14 +239,17 @@ async function startup() {
     console.warn("[worker] Could not clean stuck jobs (DB may be unreachable):", err instanceof Error ? err.message : err);
   }
 
-  // Write a heartbeat to Postgres every 30s so /api/worker-status can detect us reliably.
-  // BullMQ's own heartbeat expires during long renders; this one doesn't.
+  // Purge stale render artifacts left from previous worker instances or crashed renders.
+  // Runs once on startup to reclaim disk space before the first render.
+  purgeOldWorkDirs();
+
+  // Write a heartbeat to Postgres every 3 min (was 30s — reduces Upstash Redis commands by 83%).
   await touchWorkerHeartbeat();
   const heartbeatInterval = setInterval(() => {
     touchWorkerHeartbeat().catch((e) =>
       console.warn("[worker] heartbeat failed:", e instanceof Error ? e.message : e)
     );
-  }, 30_000);
+  }, HEARTBEAT_MS);
 
   const renderRedis = getRenderRedis();
   const worker = new Worker<RenderJobData>(RENDER_QUEUE, processJob, {
@@ -214,7 +260,11 @@ async function startup() {
   });
 
   worker.on("completed", (job) => {
-    console.log(`[worker] Completed: ${job.id}`);
+    const rss = Math.round(process.memoryUsage().rss / 1024 / 1024);
+    console.log(`[worker] Completed: ${job.id} | RSS=${rss}MB`);
+    if (rss > OOM_RSS_LIMIT_MB) {
+      console.warn(`[worker] HIGH MEMORY after render (RSS=${rss}MB) — consider restart if this persists`);
+    }
   });
 
   worker.on("failed", (job, err) => {

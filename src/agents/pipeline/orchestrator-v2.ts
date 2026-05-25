@@ -117,6 +117,7 @@ export class PipelineOrchestratorV2 {
     fs.mkdirSync(tempDir, { recursive: true });
     fs.mkdirSync(outDir,  { recursive: true });
 
+    let pipelineResult: PipelineResult;
     try {
       await this.sheets.updateStatus(rowIndex, "Processing");
       setStatus("running", row.topic, 5);
@@ -349,7 +350,7 @@ export class PipelineOrchestratorV2 {
         emitLog("V2-Orchestrator", `Rejected: ${row.topic}`, "warning");
       }
 
-      return {
+      pipelineResult = {
         topic:      row.topic,
         slug,
         success:    approval.decision !== "rejected",
@@ -367,7 +368,7 @@ export class PipelineOrchestratorV2 {
       await this.sheets.updateStatus(rowIndex, "Error", message);
       setStatus("error");
       emitLog("V2-Orchestrator", `Fatal: ${message}`, "error");
-      return {
+      pipelineResult = {
         topic:   row.topic,
         slug,
         success: false,
@@ -378,6 +379,12 @@ export class PipelineOrchestratorV2 {
           durationMs: Date.now() - new Date(startedAt).getTime(),
         },
       };
+    } finally {
+      // Clean up tempDir + public/content/{slug}/ — Veo/Imagen3 clips copied here accumulate fast
+      try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* non-fatal */ }
+      const publicSlugDir = path.resolve("public", "content", slug);
+      try { fs.rmSync(publicSlugDir, { recursive: true, force: true }); } catch { /* non-fatal */ }
     }
+    return pipelineResult;
   }
 }

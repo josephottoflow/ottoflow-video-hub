@@ -1,8 +1,8 @@
 export { default } from "next-auth/middleware";
 
 export const config = {
-  // Protect everything except auth callbacks, the login page, and static assets
+  // Protect everything except auth callbacks, the login page, static assets, and API routes
   matcher: [
-    "/((?!api/auth|login|_next/static|_next/image|favicon\\.ico).*)",
+    "/((?!api/auth|api/advanced|api/topics|api/pipeline|login|_next/static|_next/image|favicon\\.ico).*)",
   ],
 };

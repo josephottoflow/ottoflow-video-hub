@@ -61,13 +61,13 @@ async function checkDb(): Promise<CheckCache> {
 }
 
 export async function GET() {
-  const start = Date.now();
-  const env   = validateEnv();
+  const start  = Date.now();
+  const env    = validateEnv();
+  const cached = isFresh(_redisCache, REDIS_CACHE_TTL_MS) && isFresh(_dbCache, DB_CACHE_TTL_MS);
 
   const [redis, db] = await Promise.all([checkRedis(), checkDb()]);
 
-  const allOk   = env.ok && db.ok && redis.ok;
-  const cached  = isFresh(_redisCache, REDIS_CACHE_TTL_MS) && isFresh(_dbCache, DB_CACHE_TTL_MS);
+  const allOk = env.ok && db.ok && redis.ok;
 
   return NextResponse.json(
     {

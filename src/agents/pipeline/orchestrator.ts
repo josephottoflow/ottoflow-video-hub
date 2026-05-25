@@ -163,6 +163,7 @@ export class PipelineOrchestrator {
     const tempDir = path.resolve(this.config.app.tempDir, slug);
     fs.mkdirSync(tempDir, { recursive: true });
 
+    let result: PipelineResult;
     try {
       await this.sheets.updateStatus(row.rowIndex, "Processing");
       setStatus("running", row.topic, 5);
@@ -339,14 +340,20 @@ export class PipelineOrchestrator {
 
       console.log(`[${slug}] Delivered to Telegram! Local copy → ${outputLink}`);
       setStatus("done", row.topic, 100);
-      return this.result(row.topic, slug, true, undefined, startedAt, startTime, outputLink, outputDir);
+      result = this.result(row.topic, slug, true, undefined, startedAt, startTime, outputLink, outputDir);
 
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       await this.sheets.updateStatus(row.rowIndex, "Error", msg);
       console.error(`[${slug}] Failed: ${msg}`);
-      return this.result(row.topic, slug, false, msg, startedAt, startTime);
+      result = this.result(row.topic, slug, false, msg, startedAt, startTime);
+    } finally {
+      // Clean up tempDir + public/content/{slug}/ — Pexels backgrounds (50-200MB each) accumulate fast
+      try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* non-fatal */ }
+      const publicSlugDir = path.resolve("public", "content", slug);
+      try { fs.rmSync(publicSlugDir, { recursive: true, force: true }); } catch { /* non-fatal */ }
     }
+    return result;
   }
 
   // === Fetch Pexels backgrounds based on topic + style ===
