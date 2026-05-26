@@ -4,7 +4,7 @@
  * Uses GOOGLE_API_KEY (already in .env) — no new signup needed.
  * Generates one 9:16 portrait image per scene, saves to temp/{slug}/
  *
- * Model: imagen-3.0-generate-002
+ * Model: imagen-3.0-generate-001
  */
 
 import { GoogleGenAI } from "@google/genai";
@@ -42,7 +42,7 @@ export class Imagen3Agent {
     }
     try {
       const response = await this.ai.models.generateImages({
-        model:  "imagen-3.0-generate-002",
+        model:  "imagen-3.0-generate-001",
         prompt: this.enhancePrompt(prompt),
         config: { numberOfImages: 1, aspectRatio: "9:16", outputMimeType: "image/jpeg" },
       });
@@ -64,7 +64,7 @@ export class Imagen3Agent {
         const asStr = JSON.stringify(err);
         if (asStr !== "{}") detail = asStr;
       } catch { /* non-serialisable */ }
-      console.error(`[imagen3] generateSingleImage FAILED — model=imagen-3.0-generate-002 path=${path.basename(outPath)}`);
+      console.error(`[imagen3] generateSingleImage FAILED — model=imagen-3.0-generate-001 path=${path.basename(outPath)}`);
       console.error(`[imagen3] error.message: ${msg}`);
       if (detail !== msg) console.error(`[imagen3] error.detail: ${detail.slice(0, 1000)}`);
       return null;
@@ -108,7 +108,7 @@ export class Imagen3Agent {
     tempDir: string
   ): Promise<string> {
     const response = await this.ai!.models.generateImages({
-      model:  "imagen-3.0-generate-002",
+      model:  "imagen-3.0-generate-001",
       prompt: this.enhancePrompt(prompt),
       config: {
         numberOfImages:  1,
@@ -129,6 +129,6 @@ export class Imagen3Agent {
   }
 
   private enhancePrompt(prompt: string): string {
-    return `${prompt}. Cinematic photography, portrait orientation 9:16, dramatic lighting, photorealistic, sharp focus, professional color grading, no text, no watermarks.`;
+    return `${prompt}. Portrait orientation 9:16, photorealistic, sharp focus, natural authentic color grading, no text, no watermarks, no UI overlays.`;
   }
 }

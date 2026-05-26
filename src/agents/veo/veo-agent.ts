@@ -173,9 +173,14 @@ export class VeoAgent {
     outPath:  string,
     durationS: number
   ): Promise<string> {
+    // Pass the storyboard's UGC-native visualPrompt directly — do NOT append generic
+    // "dramatic lighting" or "cinematic" modifiers that override the creator-realism doctrine.
+    // The storyboard already includes: handheld framing, natural light, real environments,
+    // behavioral cues, and TikTok-native framing. Appending "dramatic lighting" fights that.
+    const veoPrompt = `${prompt}. 9:16 vertical portrait, natural authentic motion, no text overlays, no UI elements.`;
     let operation = await this.ai!.models.generateVideos({
       model:  VEO_MODEL,
-      prompt: `${prompt}. Slow cinematic camera movement, smooth motion, dramatic lighting, photorealistic 9:16 portrait, no text overlays.`,
+      prompt: veoPrompt,
       config: {
         numberOfVideos:  1,
         durationSeconds: durationS,

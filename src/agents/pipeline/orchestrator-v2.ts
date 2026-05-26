@@ -321,9 +321,17 @@ export class PipelineOrchestratorV2 {
 
       _t = Date.now();
       TRACE(`Pre-render state: clips=${Object.keys(clipUrlMap).length}/${sb.scenes.length} images=${Object.keys(imageUrlMap).length} voiceover=${!!voicePath} music=${!!musicTrack} tempDir=${tempDir}`);
-      TRACE(`Scenes with video: ${storyboardData.scenes.filter(s=>s.videoClipPath).map(s=>s.id).join(",") || "NONE"}`);
-      TRACE(`Scenes with image: ${storyboardData.scenes.filter(s=>s.imagePath).map(s=>s.id).join(",") || "NONE"}`);
-      TRACE(`Scenes with NO assets: ${storyboardData.scenes.filter(s=>!s.videoClipPath && !s.imagePath).map(s=>s.id).join(",") || "none — all covered"}`);
+      // ── HARD ASSET MANIFEST — printed to logs for explicit verification ──────
+      emitLog("V2-Orchestrator", "═══════════════ SCENE ASSET MANIFEST ═══════════════", "info");
+      for (const scene of storyboardData.scenes) {
+        const hasClip  = !!scene.videoClipPath;
+        const hasImage = !hasClip && !!scene.imagePath;
+        const layer    = hasClip ? `VEO CLIP (${scene.videoClipPath?.split("/").pop()})` : hasImage ? `IMAGEN3 IMAGE (${scene.imagePath?.split("/").pop()})` : "PROCEDURAL FALLBACK ⚠️";
+        emitLog("V2-Orchestrator", `  ${scene.id} [${scene.beat.toUpperCase().padEnd(7)}] → ${layer}`, hasClip ? "success" : hasImage ? "info" : "warning");
+        TRACE(`AssetManifest: scene=${scene.id} beat=${scene.beat} videoClipPath=${scene.videoClipPath || "NONE"} imagePath=${scene.imagePath || "NONE"} layer=${layer}`);
+      }
+      emitLog("V2-Orchestrator", `  Summary: ${Object.keys(clipUrlMap).length}/${sb.scenes.length} Veo clips | ${Object.keys(imageUrlMap).length} Imagen3 images | ${sb.scenes.length - Object.keys(clipUrlMap).length - Object.keys(imageUrlMap).length} procedural`, "info");
+      emitLog("V2-Orchestrator", "═════════════════════════════════════════════════════", "info");
       emitLog("V2-Orchestrator", `Remotion render starting — composition=v2-ugc outputDir=${tempDir} scenes=${storyboardData.scenes.length} clipsReady=${Object.keys(clipUrlMap).length} imagesReady=${Object.keys(imageUrlMap).length}`, "info");
       const renderResult = await this.renderAgent.render(slug, videoData, tempDir, "v2-ugc");
       if (!renderResult.success || !renderResult.videoPath) {
