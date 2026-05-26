@@ -152,7 +152,7 @@ export class SheetsClient {
     this.spreadsheetId = config.google.spreadsheetId;
     this.sheetName = sheetName;
     this.schema     = schema;
-    this.dataStartRow = schema === "v2-advanced" ? 4 : 2;
+    this.dataStartRow = schema === "v2-advanced" ? 3 : 2;
   }
 
   /**
