@@ -55,7 +55,7 @@ export class AIOrchestrator {
 
       // When falling back to a different provider, use its default flash model
       const model = providerName !== route.provider
-        ? (FALLBACK_MODEL_FOR_PROVIDER[providerName] ?? "gemini-2.0-flash")
+        ? (FALLBACK_MODEL_FOR_PROVIDER[providerName] ?? "gemini-2.5-flash")
         : route.model;
 
       const t0 = Date.now();

@@ -211,7 +211,9 @@ export class VeoAgent {
       console.log(`[veo] wrote ${(Buffer.from(videoBytes,"base64").length/1024/1024).toFixed(1)}MB from videoBytes`);
     } else if (uri) {
       console.log(`[veo] downloading from uri: ${uri.slice(0, 80)}`);
-      const res = await fetch(uri);
+      const apiKey = process.env.GOOGLE_API_KEY ?? "";
+      const dlUrl  = `${uri}${uri.includes("?") ? "&" : "?"}key=${apiKey}`;
+      const res = await fetch(dlUrl);
       if (!res.ok) throw new Error(`Failed to download video from uri: HTTP ${res.status} ${res.statusText}`);
       const buf = Buffer.from(await res.arrayBuffer());
       fs.writeFileSync(outPath, buf);
@@ -260,7 +262,9 @@ export class VeoAgent {
     if (videoBytes) {
       fs.writeFileSync(outPath, Buffer.from(videoBytes, "base64"));
     } else if (uri) {
-      const res = await fetch(uri);
+      const apiKey = process.env.GOOGLE_API_KEY ?? "";
+      const dlUrl  = `${uri}${uri.includes("?") ? "&" : "?"}key=${apiKey}`;
+      const res = await fetch(dlUrl);
       if (!res.ok) throw new Error(`Failed to download video from ${uri}: ${res.statusText}`);
       fs.writeFileSync(outPath, Buffer.from(await res.arrayBuffer()));
     } else {

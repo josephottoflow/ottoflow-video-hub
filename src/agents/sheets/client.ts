@@ -441,6 +441,41 @@ export class SheetsClient {
     });
   }
 
+  // === Add a new topic row to the v2-advanced sheet (sparse column layout) ===
+
+  async appendRow(row: {
+    topic:   string;
+    style?:  string;
+    voice?:  string;
+    status?: string;
+  }): Promise<number> {
+    if (this.schema !== "v2-advanced") {
+      return this.addContent({
+        topic: row.topic,
+        style: row.style || "Educational",
+        voice: row.voice || "Female energetic",
+      });
+    }
+    // 73-column v2-advanced layout: B(1)=topic, E(4)=style, G(6)=voice, BG(58)=status
+    const sparse = Array(73).fill("") as string[];
+    sparse[1]  = row.topic;
+    sparse[4]  = row.style  || "Educational";
+    sparse[6]  = row.voice  || "Female energetic";
+    sparse[58] = row.status || "Pending";
+
+    const res = await this.sheets.spreadsheets.values.append({
+      spreadsheetId: this.spreadsheetId,
+      range: `${this.sheetName}!A:BU`,
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: [sparse] },
+    });
+
+    const updated = res.data.updates?.updatedRange || "";
+    const match   = updated.match(/!A(\d+)/);
+    return match ? parseInt(match[1]) : -1;
+  }
+
   // === Add a new content row ===
 
   async addContent(row: Partial<ContentRow>): Promise<number> {

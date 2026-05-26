@@ -39,8 +39,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "topics array is required and must not be empty" }, { status: 400 });
     }
 
-    const sheetName = version === "v2" ? "Video Gen" : undefined;
-    const sheets    = new SheetsClient(sheetName);
+    const sheetName = version === "v2" ? "Video Gen — Advance Tier" : undefined;
+    const schema    = version === "v2" ? "v2-advanced" as const : "v1" as const;
+    const sheets    = new SheetsClient(sheetName, schema);
     await sheets.initializeSheet();
 
     const results: { rowIndex: number; topic: string; jobId?: string; template?: string }[] = [];
@@ -48,7 +49,9 @@ export async function POST(req: Request) {
 
     for (const topic of topics) {
       try {
-        const rowIndex = await sheets.addContent({ topic, style, voice });
+        const rowIndex = version === "v2"
+          ? await sheets.appendRow({ topic, style, voice })
+          : await sheets.addContent({ topic, style, voice });
 
         if (autoQueue) {
           const renderVariant = (variantOverride as RenderVariant | undefined) ?? rand(ALL_VARIANTS);
@@ -57,8 +60,8 @@ export async function POST(req: Request) {
           await upsertContentRow({ row_index: rowIndex, topic, style, voice });
 
           if (version === "v2") {
-            const job = await createJob(rowIndex, topic, "v2-ugc", { version: "v2", renderVariant, hookStyle, sheetName: "Video Gen", musicVibe });
-            await enqueueRender({ rowIndex, template: "v2-ugc", topic, dbJobId: job.id, version: "v2", sheetName: "Video Gen", renderVariant, hookStyle, musicVibe, scheduledAt });
+            const job = await createJob(rowIndex, topic, "v2-ugc", { version: "v2", renderVariant, hookStyle, sheetName: "Video Gen — Advance Tier", musicVibe });
+            await enqueueRender({ rowIndex, template: "v2-ugc", topic, dbJobId: job.id, version: "v2", sheetName: "Video Gen — Advance Tier", renderVariant, hookStyle, musicVibe, scheduledAt });
             await sheets.updateStatus(rowIndex, scheduledAt ? "Scheduled" : "Queued");
             results.push({ rowIndex, topic, jobId: job.id, template: "v2-ugc" });
           } else {

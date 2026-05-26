@@ -19,7 +19,7 @@ const HOOK_STYLES: HookStyle[]   = ["question", "bold-statement", "conflict", "p
 function randomVariant()   { return VARIANTS[Math.floor(Math.random() * VARIANTS.length)]; }
 function randomHookStyle() { return HOOK_STYLES[Math.floor(Math.random() * HOOK_STYLES.length)]; }
 
-const SHEET_NAME = "Video Gen";
+const SHEET_NAME = "Video Gen — Advance Tier";
 
 export async function POST(req: NextRequest) {
   const body           = await req.json().catch(() => ({})) as { rowIndex?: number; musicVibe?: string };
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     setStatus("running", "", 0);
     emitLog("V2-Orchestrator", singleRowIndex !== undefined ? `Queuing V2 row ${singleRowIndex}` : "Queuing all V2 pending", "info");
 
-    const sheets = new SheetsClient(SHEET_NAME);
+    const sheets = new SheetsClient(SHEET_NAME, "v2-advanced");
     await sheets.initializeSheet();
 
     if (singleRowIndex !== undefined) {
