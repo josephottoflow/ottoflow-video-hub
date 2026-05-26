@@ -15,7 +15,7 @@ import * as http from "http";
 import * as fs   from "fs";
 import * as path from "path";
 import { Worker, Job } from "bullmq";
-import { getRenderRedis, RENDER_QUEUE, RenderJobData } from "../lib/queue";
+import { getRenderRedis, getRenderQueue, RENDER_QUEUE, RenderJobData } from "../lib/queue";
 import { enqueueRender } from "../lib/queue";
 import { PipelineOrchestrator }   from "../agents/pipeline/orchestrator";
 import { PipelineOrchestratorV2 } from "../agents/pipeline/orchestrator-v2";
@@ -113,6 +113,47 @@ function startStaticServer() {
           }
         })();
       });
+      return;
+    }
+
+    // Admin cleanup endpoint — POST /api/cleanup
+    // Obliterates all BullMQ jobs and marks stuck DB jobs as error.
+    if (req.method === "POST" && req.url === "/api/cleanup") {
+      const auth = req.headers["authorization"] || "";
+      if (!ADMIN_SECRET || auth !== `Bearer ${ADMIN_SECRET}`) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized" }));
+        return;
+      }
+      (async () => {
+        try {
+          const queue = getRenderQueue();
+          // Get counts before obliterate for the report
+          const [waiting, active, delayed, failed, completed] = await Promise.all([
+            queue.getWaitingCount(),
+            queue.getActiveCount(),
+            queue.getDelayedCount(),
+            queue.getFailedCount(),
+            queue.getCompletedCount(),
+          ]);
+          // Obliterate wipes all jobs including active — safe since worker restarts clean state
+          await queue.obliterate({ force: true });
+          // Mark any DB jobs still in "processing" as error (grace period 0 = all of them)
+          const dbCleaned = await markStuckJobsError(0);
+          console.log(`[cleanup] Queue obliterated — was: waiting=${waiting} active=${active} delayed=${delayed} failed=${failed} completed=${completed}; DB fixed=${dbCleaned}`);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({
+            success: true,
+            queue: { waiting, active, delayed, failed, completed },
+            dbJobsCleaned: dbCleaned,
+          }));
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "Unknown error";
+          console.error(`[cleanup] FAILED: ${msg}`);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: msg }));
+        }
+      })();
       return;
     }
 
