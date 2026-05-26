@@ -186,33 +186,42 @@ export class PipelineOrchestratorV2 {
 
       const localPort = process.env.PORT || "3000";
       if (VeoAgent.isAvailable()) {
-        emitLog("V2-Orchestrator", `Generating ${sb.scenes.length} Veo clips...`, "info");
+        emitLog("V2-Orchestrator", `Generating ${sb.scenes.length} Veo clips (serialized — avoids burst 429)...`, "info");
         TRACE(`Veo: model=veo-3.1-lite-generate-preview scenes=${sb.scenes.length} GOOGLE_API_KEY=${process.env.GOOGLE_API_KEY ? process.env.GOOGLE_API_KEY.slice(0,8)+"..." : "MISSING"}`);
         _t = Date.now();
-        await Promise.all(sb.scenes.map(async (scene, i) => {
-          const outFile  = `clip-${scene.id}.mp4`;
-          const outPath  = path.join(tempDir, outFile);
-          const veoDur   = clampVeoDuration(scene.seconds);
+        // SERIALIZED — not Promise.all. Concurrent requests burst the rate limit (4 QPM).
+        // Sequential with a 5s gap keeps throughput under the quota ceiling.
+        for (let i = 0; i < sb.scenes.length; i++) {
+          const scene   = sb.scenes[i];
+          const outFile = `clip-${scene.id}.mp4`;
+          const outPath = path.join(tempDir, outFile);
+          const veoDur  = clampVeoDuration(scene.seconds);
           TRACE(`Veo[${i+1}/${sb.scenes.length}] scene=${scene.id} beat=${scene.beat} dur=${veoDur}s prompt="${scene.visualPrompt.slice(0,80)}..."`);
           const clipPath = await this.veo.generateSingleClip(scene.visualPrompt, outPath, veoDur);
           if (clipPath) {
-            const clipSizeMb = (fs.statSync(clipPath).size / 1024 / 1024).toFixed(1);
+            const clipSizeBytes = fs.statSync(clipPath).size;
+            const clipSizeMb    = (clipSizeBytes / 1024 / 1024).toFixed(2);
             let clipUrl: string | undefined;
             if (isR2Available()) {
               try { clipUrl = await uploadFileToR2(`clips/${slug}/${outFile}`, clipPath, "video/mp4"); } catch { /* fall through */ }
             }
             if (!clipUrl) {
-              try { fs.copyFileSync(clipPath, path.join(publicContent, outFile)); } catch { /* skip */ }
+              const destPublic = path.join(publicContent, outFile);
+              try { fs.copyFileSync(clipPath, destPublic); } catch (copyErr) {
+                TRACE_ERR(`Veo[${i+1}] copy to public FAILED: ${copyErr instanceof Error ? copyErr.message : copyErr} — src=${clipPath} dest=${destPublic}`);
+              }
               clipUrl = `http://localhost:${localPort}/content/${slug}/${outFile}`;
             }
             clipUrlMap[scene.id] = clipUrl;
-            emitLog("V2-Orchestrator", `Veo clip ${i + 1}/${sb.scenes.length} — ${scene.beat} (${veoDur}s) → ${clipUrl}`, "success");
-            TRACE(`Veo[${i+1}] SUCCESS: ${clipSizeMb}MB → ${clipUrl}`);
+            emitLog("V2-Orchestrator", `Veo clip ${i+1}/${sb.scenes.length} ✅ — ${scene.beat} (${veoDur}s, ${clipSizeMb}MB)`, "success");
+            TRACE(`Veo[${i+1}] SUCCESS: bytes=${clipSizeBytes} sizeMb=${clipSizeMb} exists=${fs.existsSync(outPath)} url=${clipUrl}`);
           } else {
-            emitLog("V2-Orchestrator", `Veo scene ${scene.id} failed — will use Imagen3`, "warning");
-            TRACE_ERR(`Veo[${i+1}] FAILED: scene=${scene.id} beat=${scene.beat} — check [veo] log lines above for API error detail`);
+            emitLog("V2-Orchestrator", `Veo scene ${scene.id} ❌ — will use Imagen3 fallback`, "warning");
+            TRACE_ERR(`Veo[${i+1}] FAILED: scene=${scene.id} beat=${scene.beat}`);
           }
-        }));
+          // 5s gap between Veo requests — keeps burst rate under 4 QPM ceiling
+          if (i < sb.scenes.length - 1) await new Promise(r => setTimeout(r, 5_000));
+        }
         TRACE(`Veo batch done in ${Date.now()-_t}ms — ${Object.keys(clipUrlMap).length}/${sb.scenes.length} clips generated. Missing: ${sb.scenes.filter(s=>!clipUrlMap[s.id]).map(s=>s.id).join(",")||"none"}`);
       } else {
         TRACE(`Veo SKIPPED — GOOGLE_API_KEY not set`);
@@ -222,7 +231,7 @@ export class PipelineOrchestratorV2 {
       const missingScenes = sb.scenes.filter(s => !clipUrlMap[s.id]);
       if (missingScenes.length > 0) {
         emitLog("V2-Orchestrator", `Imagen3 fallback for ${missingScenes.length} scene(s)...`, "info");
-        TRACE(`Imagen3: falling back for scenes: ${missingScenes.map(s=>s.id).join(",")} — model=imagen-3.0-generate-002`);
+        TRACE(`Imagen3: falling back for scenes: ${missingScenes.map(s=>s.id).join(",")} — model=gemini-2.0-flash-preview-image-generation`);
         _t = Date.now();
         await Promise.all(missingScenes.map(async (scene) => {
           try {

@@ -29,6 +29,11 @@ const VOICE_MAP: Record<string, string> = {
   "female soft":          "EXAVITQu4vr4xnSDxMaL",    // Bella — soft, warm
   "female warm":          "ThT5KcBeYPX3keUQqHPh",    // Dorothy — warm, engaging
   "female professional":  "jsCqWAovK2LkecY7zXl4",    // Freya — confident
+  "female bright":        "jBpfuIE2acCO8z3wKNLl",    // Gigi — bright, bubbly, youthful
+  "female cheerful":      "jBpfuIE2acCO8z3wKNLl",    // Gigi — alias
+  "bright friendly":      "jBpfuIE2acCO8z3wKNLl",    // Gigi — alias for "Bright and Friendly" style
+  "nichalia":             "jBpfuIE2acCO8z3wKNLl",    // Gigi — closest to Nichalia Schwartz bright style
+  "nichalia schwartz":    "jBpfuIE2acCO8z3wKNLl",    // Gigi — alias
   // Male voices
   "male deep":            "TxGEqnHWrfWFTfGW9XjX",    // Josh — deep, authoritative
   "male professional":    "VR6AewLTigWG4xSOukaG",    // Arnold — crisp, professional

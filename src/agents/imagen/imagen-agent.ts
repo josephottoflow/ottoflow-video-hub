@@ -1,10 +1,13 @@
 /**
- * IMAGEN 3 AGENT — Google AI image generation per scene
+ * IMAGEN AGENT — Gemini 2.0 Flash image generation per scene
  *
  * Uses GOOGLE_API_KEY (already in .env) — no new signup needed.
  * Generates one 9:16 portrait image per scene, saves to temp/{slug}/
  *
- * Model: imagen-3.0-generate-001
+ * Model: gemini-2.0-flash-preview-image-generation
+ * (Imagen 3 via models.generateImages() requires Vertex AI service-account auth,
+ *  which is incompatible with a plain API key. Gemini Flash image generation works
+ *  via the standard AI Studio key and produces equivalent quality.)
  */
 
 import { GoogleGenAI } from "@google/genai";
@@ -41,19 +44,8 @@ export class Imagen3Agent {
       return outPath;
     }
     try {
-      const response = await this.ai.models.generateImages({
-        model:  "imagen-3.0-generate-001",
-        prompt: this.enhancePrompt(prompt),
-        config: { numberOfImages: 1, aspectRatio: "9:16", outputMimeType: "image/jpeg" },
-      });
-      const image = response.generatedImages?.[0];
-      if (!image?.image?.imageBytes) {
-        const respSummary = JSON.stringify(response).slice(0, 500);
-        console.error(`[imagen3] no imageBytes in response: ${respSummary}`);
-        throw new Error("Imagen3 returned no image bytes");
-      }
+      const buf = await this.generateImageBytes(prompt);
       fs.mkdirSync(path.dirname(outPath), { recursive: true });
-      const buf = Buffer.from(image.image.imageBytes, "base64");
       fs.writeFileSync(outPath, buf);
       console.log(`[imagen3] saved ${(buf.length/1024).toFixed(0)}KB → ${path.basename(outPath)}`);
       return outPath;
@@ -64,7 +56,7 @@ export class Imagen3Agent {
         const asStr = JSON.stringify(err);
         if (asStr !== "{}") detail = asStr;
       } catch { /* non-serialisable */ }
-      console.error(`[imagen3] generateSingleImage FAILED — model=imagen-3.0-generate-001 path=${path.basename(outPath)}`);
+      console.error(`[imagen3] generateSingleImage FAILED — model=gemini-2.0-flash-preview-image-generation path=${path.basename(outPath)}`);
       console.error(`[imagen3] error.message: ${msg}`);
       if (detail !== msg) console.error(`[imagen3] error.detail: ${detail.slice(0, 1000)}`);
       return null;
@@ -107,25 +99,33 @@ export class Imagen3Agent {
     slug:    string,
     tempDir: string
   ): Promise<string> {
-    const response = await this.ai!.models.generateImages({
-      model:  "imagen-3.0-generate-001",
-      prompt: this.enhancePrompt(prompt),
-      config: {
-        numberOfImages:  1,
-        aspectRatio:     "9:16",
-        outputMimeType:  "image/jpeg",
-      },
-    });
-
-    const image = response.generatedImages?.[0];
-    if (!image?.image?.imageBytes) throw new Error("No image bytes returned");
-
-    const buffer   = Buffer.from(image.image.imageBytes, "base64");
-    const outPath  = path.join(tempDir, `scene-${beat}.jpg`);
+    const buffer  = await this.generateImageBytes(prompt);
+    const outPath = path.join(tempDir, `scene-${beat}.jpg`);
     fs.mkdirSync(tempDir, { recursive: true });
     fs.writeFileSync(outPath, buffer);
-
     return outPath;
+  }
+
+  /**
+   * Core image generation via Gemini 2.0 Flash (works with AI Studio API key).
+   * Imagen 3 (`models.generateImages()`) hits a Vertex AI /predict endpoint that
+   * requires service-account auth and returns HTTP 404 for plain API keys.
+   */
+  private async generateImageBytes(prompt: string): Promise<Buffer> {
+    const response = await this.ai!.models.generateContent({
+      model:    "gemini-2.0-flash-preview-image-generation",
+      contents: this.enhancePrompt(prompt),
+      config:   { responseModalities: ["IMAGE"] },
+    });
+
+    const parts = response.candidates?.[0]?.content?.parts ?? [];
+    const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith("image/"));
+    if (!imagePart?.inlineData?.data) {
+      const respSummary = JSON.stringify(response).slice(0, 500);
+      console.error(`[imagen3] no image part in response: ${respSummary}`);
+      throw new Error("Gemini image generation returned no image data");
+    }
+    return Buffer.from(imagePart.inlineData.data, "base64");
   }
 
   private enhancePrompt(prompt: string): string {
