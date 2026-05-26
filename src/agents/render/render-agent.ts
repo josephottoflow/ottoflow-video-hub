@@ -120,6 +120,12 @@ export class RenderAgent {
         jpegQuality: 75,
         // Single Chrome instance — halves the Chromium RSS on Railway's 512MB free tier
         concurrency: 1,
+        // Scale down to 720p portrait — reduces Remotion's internal FFmpeg frame buffer
+        // memory by ~56% vs 1080×1920. FFmpegAgent rescales back to 1080×1920 in post.
+        width:  720,
+        height: 1280,
+        // Cap video bitrate so libx264 uses fewer reference frame buffers
+        videoBitrate: "2M",
         timeoutInMilliseconds: 120_000,
         // Software GL for containerised Linux (no GPU on Railway/cloud)
         chromiumOptions: process.platform === "linux" ? { gl: "swangle" } : undefined,
