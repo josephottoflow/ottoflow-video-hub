@@ -2,7 +2,6 @@ import type { TaskType, Tier, RouteConfig } from "./types";
 
 // USD cost per 1M tokens (approximate 2026 pricing)
 const TOKEN_COSTS: Record<string, { input: number; output: number }> = {
-  "gemini-2.5-flash": { input: 0.075, output: 0.30 },
   "gemini-2.5-flash": { input: 0.15,  output: 0.60 },
 };
 
