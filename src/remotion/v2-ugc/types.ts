@@ -79,9 +79,9 @@ export type V2UGCProps     = z.infer<typeof v2UGCSchema>;
 
 // Visual style → overlay + highlight color
 export const VISUAL_STYLE_TOKENS: Record<string, { overlayColor: string; highlightColor: string; overlayAlpha: number }> = {
-  "dark-cinematic": { overlayColor: "0,0,0",     highlightColor: "#FFE500", overlayAlpha: 0.55 },
-  "bright-minimal": { overlayColor: "10,10,30",   highlightColor: "#6366f1", overlayAlpha: 0.30 },
-  "neon-tech":      { overlayColor: "5,0,20",     highlightColor: "#00ff88", overlayAlpha: 0.65 },
-  "warm-story":     { overlayColor: "20,8,0",     highlightColor: "#FFD700", overlayAlpha: 0.50 },
-  "high-contrast":  { overlayColor: "0,0,0",      highlightColor: "#FF0055", overlayAlpha: 0.70 },
+  "dark-cinematic": { overlayColor: "0,0,0",     highlightColor: "#FFE500", overlayAlpha: 0.32 },
+  "bright-minimal": { overlayColor: "10,10,30",   highlightColor: "#6366f1", overlayAlpha: 0.22 },
+  "neon-tech":      { overlayColor: "5,0,20",     highlightColor: "#00ff88", overlayAlpha: 0.40 },
+  "warm-story":     { overlayColor: "20,8,0",     highlightColor: "#FFD700", overlayAlpha: 0.30 },
+  "high-contrast":  { overlayColor: "0,0,0",      highlightColor: "#FF0055", overlayAlpha: 0.45 },
 };

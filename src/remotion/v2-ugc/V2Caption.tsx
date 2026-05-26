@@ -44,9 +44,10 @@ export const V2Caption: React.FC<V2CaptionProps> = ({
               fontSize:      isKey ? 92 : 78,
               fontWeight:    900,
               color:         isKey ? highlightColor : "#FFFFFF",
+              WebkitTextStroke: isKey ? "0px" : "1.5px rgba(0,0,0,0.8)",
               textShadow:    isKey
-                ? `0 0 40px ${highlightColor}80, 0 4px 16px rgba(0,0,0,0.9)`
-                : "0 4px 16px rgba(0,0,0,0.85)",
+                ? `0 0 40px ${highlightColor}80, 0 0 12px rgba(0,0,0,1), 0 4px 16px rgba(0,0,0,0.9)`
+                : "0 0 8px rgba(0,0,0,1), 0 4px 16px rgba(0,0,0,0.95)",
               letterSpacing: isKey ? "0.04em" : "0.01em",
               lineHeight:    1.1,
               marginBottom:  8,
@@ -77,7 +78,8 @@ export const V2Caption: React.FC<V2CaptionProps> = ({
               fontSize:   78,
               fontWeight: 800,
               color:      isKey ? highlightColor : "#FFFFFF",
-              textShadow: "0 4px 16px rgba(0,0,0,0.85)",
+              WebkitTextStroke: "1.5px rgba(0,0,0,0.8)",
+              textShadow: "0 0 8px rgba(0,0,0,1), 0 4px 16px rgba(0,0,0,0.95)",
               lineHeight: 1.15,
               marginBottom: 6,
             }}>
@@ -105,9 +107,10 @@ export const V2Caption: React.FC<V2CaptionProps> = ({
               fontSize:      82,
               fontWeight:    800,
               color:         isKey ? highlightColor : "#FFFFFF",
+              WebkitTextStroke: isKey ? "0px" : "1.5px rgba(0,0,0,0.8)",
               textShadow:    isKey
-                ? `0 0 30px ${highlightColor}60, 0 4px 16px rgba(0,0,0,0.9)`
-                : "0 4px 20px rgba(0,0,0,0.85)",
+                ? `0 0 30px ${highlightColor}60, 0 0 10px rgba(0,0,0,1), 0 4px 16px rgba(0,0,0,0.9)`
+                : "0 0 8px rgba(0,0,0,1), 0 4px 20px rgba(0,0,0,0.95)",
               lineHeight:    1.15,
             }}>
               {isKey ? word.toUpperCase() : word}
@@ -135,9 +138,10 @@ export const V2Caption: React.FC<V2CaptionProps> = ({
             fontSize:      isKey ? 96 : 80,
             fontWeight:    900,
             color:         isKey ? highlightColor : "#FFFFFF",
+            WebkitTextStroke: isKey ? "0px" : "1.5px rgba(0,0,0,0.8)",
             textShadow:    isKey
-              ? `0 0 60px ${highlightColor}90, 0 4px 20px rgba(0,0,0,0.9)`
-              : "0 4px 16px rgba(0,0,0,0.85)",
+              ? `0 0 60px ${highlightColor}90, 0 0 12px rgba(0,0,0,1), 0 4px 20px rgba(0,0,0,0.9)`
+              : "0 0 8px rgba(0,0,0,1), 0 4px 16px rgba(0,0,0,0.95)",
             letterSpacing: isKey ? "0.05em" : "0.01em",
             lineHeight:    1.1,
             marginBottom:  8,

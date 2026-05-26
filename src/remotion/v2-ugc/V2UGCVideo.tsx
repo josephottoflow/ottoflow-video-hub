@@ -16,8 +16,19 @@ export const V2UGCVideo: React.FC<V2UGCProps> = ({ data }) => {
   if (data.storyboard?.scenes?.length) {
     const { storyboard } = data;
     const tokens = VISUAL_STYLE_TOKENS[storyboard.visualStyle] ?? VISUAL_STYLE_TOKENS["dark-cinematic"];
-    // Use first hex color from visualTheme.palette as highlight if available (matches Veo/Imagen3 prompts)
-    const paletteHex = storyboard.visualTheme?.palette?.match(/#[0-9a-fA-F]{6}/)?.[0];
+    // Pick the first sufficiently bright hex from the palette as the highlight color.
+    // Skips dark swatches (the palette often starts with the base dark tone).
+    const paletteHex = (() => {
+      const hexes = storyboard.visualTheme?.palette?.match(/#[0-9a-fA-F]{6}/g) ?? [];
+      for (const h of hexes) {
+        const r = parseInt(h.slice(1, 3), 16) / 255;
+        const g = parseInt(h.slice(3, 5), 16) / 255;
+        const b = parseInt(h.slice(5, 7), 16) / 255;
+        const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        if (lum > 0.15) return h;
+      }
+      return null;
+    })();
     const highlightColor = paletteHex ?? tokens.highlightColor;
 
     let frameOffset = 0;
