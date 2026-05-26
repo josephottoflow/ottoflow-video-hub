@@ -19,7 +19,7 @@ import { RemotionPreview, useVideoInfo } from "./components/RemotionPreview";
 
 // ─── Types ────────────────────────────────────────────────────
 
-type View   = "center" | "queue" | "agents" | "social" | "review" | "generate";
+type View   = "dashboard" | "create" | "renders" | "library" | "publishing" | "settings";
 type Status = "idle" | "running" | "done" | "error";
 type Tier   = "basic" | "advanced";
 
@@ -132,12 +132,12 @@ const ADVANCED_STAGES = [
 ];
 
 const NAV: { id: View; label: string; Icon: React.ElementType }[] = [
-  { id: "center",   label: "Command Center", Icon: LayoutDashboard },
-  { id: "generate", label: "Own Topic",      Icon: PenLine },
-  { id: "queue",    label: "Content Queue",  Icon: List },
-  { id: "agents",   label: "Agents",         Icon: Bot },
-  { id: "review",   label: "Quality Review", Icon: Star },
-  { id: "social",   label: "Social Media",   Icon: Share2 },
+  { id: "dashboard",  label: "Dashboard",       Icon: LayoutDashboard },
+  { id: "create",     label: "Create Video",    Icon: Plus },
+  { id: "renders",    label: "Active Renders",  Icon: Film },
+  { id: "library",    label: "Content Library", Icon: FolderOpen },
+  { id: "publishing", label: "Publishing",      Icon: Share2 },
+  { id: "settings",   label: "Settings",        Icon: Gauge },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -287,7 +287,7 @@ function Sidebar({ view, setView, pipeStatus, activeAgent, tier, setTier }: {
 
       {/* Nav */}
       <nav style={{ padding: "12px 8px", flex: 1 }}>
-        <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", padding: "0 8px 10px" }}>Navigation</div>
+        <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", padding: "0 8px 10px" }}>Menu</div>
         {NAV.map(({ id, label, Icon }) => {
           const active = view === id;
           return (
@@ -319,7 +319,7 @@ function Sidebar({ view, setView, pipeStatus, activeAgent, tier, setTier }: {
 
       {/* Tier Toggle */}
       <div style={{ padding: "12px 12px 0", borderTop: "1px solid var(--border)" }}>
-        <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8, paddingLeft: 4 }}>Pipeline Tier</div>
+        <div style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8, paddingLeft: 4 }}>Mode</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {(["basic", "advanced"] as Tier[]).map(t => (
             <button key={t} onClick={() => setTier(t)} style={{
@@ -336,9 +336,9 @@ function Sidebar({ view, setView, pipeStatus, activeAgent, tier, setTier }: {
             }}>
               <span style={{ fontSize: 14 }}>{t === "advanced" ? "⚡" : "◎"}</span>
               <div>
-                <div>{t === "advanced" ? "Advanced" : "Basic"}</div>
+                <div>{t === "advanced" ? "Ops Dashboard" : "Studio"}</div>
                 <div style={{ fontSize: 9, fontWeight: 500, color: "var(--text-muted)", marginTop: 1 }}>
-                  {t === "advanced" ? "Veo · Video Gen" : "Pexels · Sheet1"}
+                  {t === "advanced" ? "System monitoring" : "Create & publish"}
                 </div>
               </div>
               {tier === t && <CheckCircle2 size={12} style={{ marginLeft: "auto", flexShrink: 0 }} color={t === "advanced" ? "#a78bfa" : "var(--text-muted)"} />}
@@ -1369,7 +1369,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
           <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
             <span style={{ fontSize: 9, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "1px", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
               {pipeStatus === "running" && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", display: "inline-block", animation: "pulse 1.5s infinite" }} />}
-              <Terminal size={10} /> Live Log
+              <Activity size={10} /> Live Output
             </span>
             <button onClick={() => { setLogs([]); fetch("/api/pipeline-events", { method: "DELETE" }).catch(() => {}); }} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 9, fontFamily: "inherit", fontWeight: 700, letterSpacing: "0.5px" }}>CLEAR</button>
           </div>
@@ -3459,10 +3459,213 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
   );
 }
 
+// ─── Active Renders View ──────────────────────────────────────
+
+function ActiveRendersView() {
+  const [jobs, setJobs] = useState<DbJob[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchJobs = useCallback(async () => {
+    const r = await fetch("/api/jobs?limit=30").catch(() => null);
+    if (r?.ok) { const d = await r.json(); setJobs(d.jobs || []); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchJobs(); const t = setInterval(fetchJobs, 5000); return () => clearInterval(t); }, [fetchJobs]);
+
+  const active  = jobs.filter(j => j.status === "processing" || j.status === "pending");
+  const recent  = jobs.filter(j => j.status === "done" || j.status === "error").slice(0, 15);
+
+  return (
+    <div style={{ padding: "28px 32px", maxWidth: 900 }}>
+      <PageTitle title="Active Renders" sub="Live render status — updates every 5 seconds" />
+
+      {/* Active jobs */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 12 }}>In Progress</div>
+        {loading ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {[1,2].map(i => <div key={i} className="skeleton" style={{ height: 64, borderRadius: 10 }} />)}
+          </div>
+        ) : active.length === 0 ? (
+          <div className="card" style={{ textAlign: "center", padding: "36px 24px", color: "var(--text-muted)", fontSize: 13 }}>
+            <Film size={28} style={{ opacity: 0.15, display: "block", margin: "0 auto 10px" }} />
+            No active renders — queue a video from Create Video or Content Library
+          </div>
+        ) : active.map(job => (
+          <div key={job.id} className="card" style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 14, padding: "14px 18px" }}>
+            <Loader2 size={16} style={{ animation: "spin 1s linear infinite", color: "#a78bfa", flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayTopic(job.topic)}</div>
+              <div style={{ display: "flex", gap: 10, marginTop: 5 }}>
+                <div style={{ flex: 1, height: 3, borderRadius: 2, background: "var(--border)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", borderRadius: 2, background: "linear-gradient(90deg,#6366f1,#a78bfa)", width: `${job.progress ?? 0}%`, transition: "width 0.5s" }} />
+                </div>
+                <span style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>{job.progress ?? 0}%</span>
+              </div>
+            </div>
+            <StatusPill status={job.status} />
+            <span style={{ fontSize: 11, color: "var(--text-muted)", flexShrink: 0 }}>{job.template}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Recent */}
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 12 }}>Recent</div>
+        {recent.length === 0 ? (
+          <div style={{ fontSize: 12, color: "var(--text-muted)" }}>No completed renders yet.</div>
+        ) : recent.map(job => {
+          const dur = job.duration_ms ? `${Math.round(job.duration_ms / 1000)}s` : "—";
+          return (
+            <div key={job.id} className="card" style={{ marginBottom: 6, display: "flex", alignItems: "center", gap: 12, padding: "12px 16px" }}>
+              {job.status === "done"
+                ? <CheckCircle2 size={14} color="#10b981" style={{ flexShrink: 0 }} />
+                : <XCircle size={14} color="#f43f5e" style={{ flexShrink: 0 }} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayTopic(job.topic)}</div>
+                {job.status === "error" && job.error && (
+                  <div style={{ fontSize: 10, color: "#f43f5e", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.error.slice(0, 100)}</div>
+                )}
+              </div>
+              <span style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>{dur}</span>
+              {job.output_link && (
+                <a href={job.output_link} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "var(--accent)", textDecoration: "none", fontWeight: 600, flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }}>
+                  <ArrowUpRight size={12} /> View
+                </a>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Publishing View ──────────────────────────────────────────
+
+function PublishingView() {
+  const [rows,    setRows]    = useState<QueueRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter,  setFilter]  = useState<"all" | "complete" | "pending">("all");
+
+  useEffect(() => {
+    fetch("/api/queue")
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => { setRows(d.rows || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const displayed = rows.filter(row => {
+    if (filter === "complete") return ["Done","Complete"].includes(row.status);
+    if (filter === "pending")  return row.status === "Pending";
+    return true;
+  });
+
+  return (
+    <div style={{ padding: "28px 32px" }}>
+      <PageTitle title="Publishing" sub="Review completed videos and schedule for distribution" />
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 24 }}>
+        {(["all","complete","pending"] as const).map(f => (
+          <button key={f} onClick={() => setFilter(f)} style={{ padding: "5px 14px", borderRadius: 20, border: "1px solid var(--border)", cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit", background: filter === f ? "var(--primary)" : "transparent", color: filter === f ? "#fff" : "var(--text-muted)", transition: "all 0.12s" }}>
+            {f === "all" ? "All" : f === "complete" ? "Ready" : "Pending"}
+          </button>
+        ))}
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-muted)" }}>{rows.length} videos</span>
+      </div>
+
+      {/* Social scheduling — coming soon */}
+      <div className="card" style={{ marginBottom: 20, display: "flex", alignItems: "center", gap: 14, padding: "14px 20px" }}>
+        <div style={{ width: 36, height: 36, borderRadius: 9, background: "var(--primary-light)", border: "1px solid rgba(99,102,241,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Share2 size={16} color="var(--accent)" strokeWidth={1.8} />
+        </div>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text)" }}>Auto-Publish</div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>TikTok, Instagram &amp; YouTube scheduling — coming soon</div>
+        </div>
+        <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: "var(--accent)", background: "var(--primary-light)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 5, padding: "3px 9px" }}>SOON</span>
+      </div>
+
+      {loading ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))", gap: 16 }}>
+          {[1,2,3].map(i => <div key={i} className="skeleton" style={{ height: 160, borderRadius: 12 }} />)}
+        </div>
+      ) : displayed.length === 0 ? (
+        <div className="card" style={{ textAlign: "center", padding: "48px 24px", color: "var(--text-muted)", fontSize: 13 }}>
+          <Share2 size={32} style={{ opacity: 0.15, display: "block", margin: "0 auto 10px" }} />
+          No videos to publish yet — render something first.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))", gap: 16 }}>
+          {displayed.map(row => <ReviewCard key={row.rowIndex} row={row} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Settings View ────────────────────────────────────────────
+
+function SettingsView() {
+  const [svc, setSvc] = useState<Services | null>(null);
+  useEffect(() => {
+    fetch("/api/status").then(r => r.ok ? r.json() : null).then(d => { if (d) setSvc(d); }).catch(() => {});
+  }, []);
+
+  return (
+    <div style={{ padding: "28px 32px", maxWidth: 800 }}>
+      <PageTitle title="Settings" sub="Provider connections and pipeline configuration" />
+
+      {/* Service connections */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 12 }}>Provider Connections</div>
+      <div className="card" style={{ marginBottom: 28, display: "flex", gap: 0, padding: 0, overflow: "hidden" }}>
+        {(Object.keys(SVC_LABELS) as (keyof Services)[]).map((k, i) => (
+          <div key={k} style={{ flex: 1, padding: "14px 16px", borderRight: i < Object.keys(SVC_LABELS).length - 1 ? "1px solid var(--border)" : "none", display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.6px" }}>{SVC_LABELS[k]}</div>
+            {svc ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: svc[k] ? "var(--green)" : "var(--red)", flexShrink: 0, boxShadow: svc[k] ? "0 0 6px var(--green-glow)" : "none" }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: svc[k] ? "var(--green)" : "var(--red)" }}>{svc[k] ? "Live" : "Not set"}</span>
+              </div>
+            ) : (
+              <div style={{ height: 18, width: 60 }} className="skeleton" />
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Agent grid */}
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 12 }}>Pipeline Agents</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+        {ALL_AGENTS.map((a) => {
+          const on = svc ? svc[a.svc as keyof Services] : null;
+          const { Icon } = a;
+          return (
+            <div key={a.name} className="card" style={{ padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 9, flexShrink: 0, background: on === true ? "rgba(99,102,241,0.12)" : "var(--bg-elevated)", display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid ${on === true ? "rgba(99,102,241,0.25)" : "var(--border)"}` }}>
+                  <Icon size={16} color={on === true ? "var(--accent)" : "var(--text-muted)"} strokeWidth={1.8} />
+                </div>
+                {svc && (
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 20, background: svc[a.svc as keyof Services] ? "rgba(16,185,129,0.1)" : "rgba(244,63,94,0.1)", color: svc[a.svc as keyof Services] ? "var(--green)" : "var(--red)" }}>
+                    {svc[a.svc as keyof Services] ? "Live" : a.fb ?? "Offline"}
+                  </span>
+                )}
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 12, color: "var(--text)", marginBottom: 3 }}>{a.name}</div>
+              <div style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>{a.desc}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Basic App ────────────────────────────────────────────────
 
 function BasicApp({ onSwitchToAdvanced }: { onSwitchToAdvanced: () => void }) {
-  const [view,        setView]        = useState<View>("center");
+  const [view,        setView]        = useState<View>("dashboard");
   const [tier,        setTier]        = useState<Tier>("basic");
   const [pipeStatus,  setPipeStatus]  = useState<Status>("idle");
   const [activeAgent, setActiveAgent] = useState("");
@@ -3487,7 +3690,7 @@ function BasicApp({ onSwitchToAdvanced }: { onSwitchToAdvanced: () => void }) {
           setTier(t);
           if (t === "advanced") onSwitchToAdvanced();
         }} />
-        <main style={{ flex: 1, minWidth: 0, overflowY: view === "center" ? "hidden" : "auto", height: view === "center" ? "100vh" : undefined, display: "flex", flexDirection: "column", position: "relative", background: "var(--bg)" }}>
+        <main style={{ flex: 1, minWidth: 0, overflowY: view === "dashboard" ? "hidden" : "auto", height: view === "dashboard" ? "100vh" : undefined, display: "flex", flexDirection: "column", position: "relative", background: "var(--bg)" }}>
           <AnimatePresence mode="wait">
             <motion.div
               key={view}
@@ -3495,14 +3698,14 @@ function BasicApp({ onSwitchToAdvanced }: { onSwitchToAdvanced: () => void }) {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.16, ease: "easeOut" }}
-              style={{ flex: 1, display: "flex", flexDirection: "column", height: view === "center" ? "100vh" : undefined }}
+              style={{ flex: 1, display: "flex", flexDirection: "column", height: view === "dashboard" ? "100vh" : undefined }}
             >
-              {view === "center"   && <CommandCenterView tier={tier} setTier={setTier} />}
-              {view === "generate" && <OwnTopicView onGenerate={() => setView("center")} tier={tier} />}
-              {view === "queue"    && <QueueView tier={tier} />}
-              {view === "agents"   && <AgentsView />}
-              {view === "review"   && <ReviewView />}
-              {view === "social"   && <SocialView />}
+              {view === "dashboard"  && <CommandCenterView tier={tier} setTier={setTier} />}
+              {view === "create"     && <OwnTopicView onGenerate={() => setView("dashboard")} tier={tier} />}
+              {view === "renders"    && <ActiveRendersView />}
+              {view === "library"    && <QueueView tier={tier} />}
+              {view === "publishing" && <PublishingView />}
+              {view === "settings"   && <SettingsView />}
             </motion.div>
           </AnimatePresence>
         </main>

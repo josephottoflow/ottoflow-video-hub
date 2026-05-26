@@ -44,13 +44,11 @@ Output ONLY valid JSON — an array of exactly ${count} objects:
   }
 ]`;
 
-    // Advanced tier → Claude Opus for premium topic ideation
-    // Basic tier   → Gemini Flash for cost efficiency
     const aiResponse = await getAIOrchestrator().generate({
       taskType:       "topic-generate",
       prompt,
       systemPrompt,
-      tier:           opts?.tier ?? "advanced", // default to advanced — topic quality is a differentiator
+      tier:           opts?.tier ?? "advanced",
       jobId:          opts?.jobId,
       skipCache:      true, // always generate fresh topics
       responseFormat: "json",

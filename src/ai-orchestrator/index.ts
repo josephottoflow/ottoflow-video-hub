@@ -1,5 +1,4 @@
 import { GeminiProvider } from "./providers/gemini";
-import { ClaudeProvider } from "./providers/claude";
 import { resolveRoute, getCostUsd, FALLBACK_CHAINS, FALLBACK_MODEL_FOR_PROVIDER } from "./router";
 import { buildCacheKey, getCached, setCached } from "./cache";
 import { trackRequest } from "./cost-tracker";
@@ -13,13 +12,8 @@ export class AIOrchestrator {
   private providers = new Map<string, AIProvider>();
 
   constructor() {
-    // Lazy-safe: if a key is missing the provider is just absent from the map
-    // and the fallback chain will skip it gracefully
     if (process.env.GOOGLE_API_KEY) {
       try { this.providers.set("gemini", new GeminiProvider()); } catch { /* no-op */ }
-    }
-    if (process.env.ANTHROPIC_API_KEY) {
-      try { this.providers.set("claude", new ClaudeProvider()); } catch { /* no-op */ }
     }
   }
 

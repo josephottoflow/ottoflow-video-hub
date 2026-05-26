@@ -31,17 +31,14 @@ export async function GET() {
   const avgRenderMs   = await getAvgRenderTimeMs().catch(() => null);
 
   return NextResponse.json({
-    anthropic:        !!process.env.ANTHROPIC_API_KEY,
-    gemini:           !!process.env.GOOGLE_API_KEY,
-    elevenlabs:       !!process.env.ELEVENLABS_API_KEY,
-    pexels:           !!process.env.PEXELS_API_KEY,
-    telegram:         !!process.env.TELEGRAM_BOT_TOKEN,
-    sheets:           sheetsId && (oauthToken || serviceAcct),
-    n8n:              !!process.env.N8N_API_KEY,
-    ffmpeg:           checkFfmpeg(),
-    remotion:         true,
-    branding:         true,
-    jamendo:          true,
+    gemini:             !!process.env.GOOGLE_API_KEY,
+    elevenlabs:         !!process.env.ELEVENLABS_API_KEY,
+    telegram:           !!process.env.TELEGRAM_BOT_TOKEN,
+    sheets:             sheetsId && (oauthToken || serviceAcct),
+    ffmpeg:             checkFfmpeg(),
+    remotion:           true,
+    jamendo:            !!process.env.JAMENDO_CLIENT_ID,
+    r2:                 !!process.env.R2_ACCOUNT_ID,
     avg_render_time_ms: avgRenderMs,
   });
 }

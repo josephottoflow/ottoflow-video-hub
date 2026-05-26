@@ -12,26 +12,37 @@ export type MusicMood    = "tense" | "uplifting" | "mysterious" | "energetic" | 
 export type ZoomDir      = "in" | "out" | "pan";
 export type SceneBeat    = "hook" | "reveal" | "insight" | "proof" | "cta";
 
+export interface VisualTheme {
+  palette:    string;   // 3-5 named colors or hex values shared across ALL scenes
+  lighting:   string;   // shared lighting style (golden hour, neon, rim light, etc.)
+  lens:       string;   // lens character (shallow DOF, 35mm, macro, etc.)
+  filmLook:   string;   // film look (16mm grain, clean digital, anamorphic, etc.)
+  motion:     string;   // motion language (locked-off, slow dolly, handheld, etc.)
+}
+
 export interface StoryboardScene {
   id:           string;
   beat:         SceneBeat;
   seconds:      number;
   frames:       number;         // seconds * 30
   narration:    string;
-  visualPrompt: string;
+  visualPrompt: string;         // 40-80 word cinematic prompt including shared visual theme
   caption:      string;
   keyWord:      string;
   zoomDir:      ZoomDir;
   captionStyle: CaptionStyle;
+  composition?: string;         // shot type + angle (ECU, CU, MS, WS, OTS)
+  cameraMove?:  string;         // locked / slow dolly in / tracking / crane up
 }
 
 export interface Storyboard {
-  topic:       string;
-  visualStyle: VisualStyle;
-  musicMood:   MusicMood;
-  totalFrames: number;
-  fullScript:  string;
-  scenes:      StoryboardScene[];
+  topic:        string;
+  visualStyle:  VisualStyle;
+  musicMood:    MusicMood;
+  visualTheme:  VisualTheme;    // shared visual language locked before any scene is written
+  totalFrames:  number;
+  fullScript:   string;
+  scenes:       StoryboardScene[];
 }
 
 const VARIANT_GUIDE: Record<string, string> = {
@@ -99,30 +110,63 @@ export class StoryboardAgent {
       ? `\nSEED SCRIPT (use this as inspiration — preserve the angle and facts, improve the pacing):\n"${existingScript.trim()}"\n`
       : "";
 
-    const prompt = `You are a viral TikTok creative director. Generate a complete video storyboard JSON.
+    const prompt = `You are a cinematic TikTok creative director. Generate a complete video storyboard JSON for a short-form vertical video.
 
 TOPIC: "${topic}"
 CONTENT STYLE: "${style}"
 NARRATIVE VARIANT: ${renderVariant}
 HOOK STYLE: ${hookStyle} — ${hookGuide}${seedNote}
 
-NARRATIVE ARC (follow this scene structure):
+NARRATIVE ARC (follow this scene structure exactly):
 ${variantGuide}
 
-VISUAL STYLES (pick ONE that fits the topic emotional tone):
-- "dark-cinematic": dramatic tension, contrast, urgency — myths, problems, warnings
-- "bright-minimal": clean, optimistic — how-tos, growth, transformation
-- "neon-tech": deep dark with electric accents — AI, tech, data, automation
-- "warm-story": golden intimate feel — personal stories, human moments
-- "high-contrast": bold black/white aesthetic — big claims, statistics, shock
+STEP 1 — VISUAL THEME (establish this FIRST, applied to EVERY scene):
+Pick ONE visual style and lock these shared values:
+- palette: 3-4 specific colors (e.g. "deep navy #1a1f3c, electric blue #3b82f6, white #f8fafc")
+- lighting: specific style (e.g. "rim lighting from behind, warm amber key light, deep shadows")
+- lens: specific character (e.g. "shallow depth of field, 35mm full-frame look, gentle bokeh")
+- filmLook: specific grade (e.g. "subtle film grain, muted saturation, warm 3200K color temperature")
+- motion: specific movement style (e.g. "slow dolly push-ins, no handheld shake")
 
-CAPTION STYLES (vary across scenes — never repeat same style twice in a row):
-- "impact": 2-3 power words, one highlighted (hook and cta)
-- "word-by-word": words appear sequentially (revelations)
-- "slide-up": phrase slides up from bottom (mid-video insights)
-- "pulse": words scale-pulse in (proof points)
+Visual style presets:
+- "dark-cinematic": deep blacks, dramatic rim light, high contrast, 16mm grain — for myths, problems, warnings
+- "bright-minimal": clean whites, soft diffused light, shallow DOF, digital clean — for how-tos, growth
+- "neon-tech": electric color accents on deep dark, lens flare, digital precision — for AI, tech, data
+- "warm-story": golden backlight, amber, cream tones, 35mm warmth — for personal stories, human moments
+- "high-contrast": graphic black/white with single accent color, bold shadows — for stats, shock
+
+STEP 2 — EACH SCENE must reference the Visual Theme in its visualPrompt.
+
+CAPTION STYLES (vary across scenes — never same style twice in a row):
+- "impact": 2-3 power words (hook and cta beats)
+- "word-by-word": words appear sequentially (revelation beats)
+- "slide-up": phrase slides up from bottom (insight beats)
+- "pulse": words scale-pulse in (proof beats)
 
 MUSIC MOODS: tense | uplifting | mysterious | energetic | calm
+
+SHOT TYPES (pick the right one per beat):
+- ECU (Extreme Close-Up): fine detail or intense emotion — eyes only, a specific object
+- CU (Close-Up): face fills frame — dialogue, reaction, emotion
+- MCU (Medium Close-Up): head and shoulders — conversation, interview feel
+- MS (Medium Shot): waist up — action, general dialogue
+- MLS (Medium Long Shot): knees up — walking, casual movement
+- LS (Long Shot): full body — character in context
+- WS (Wide Shot): environment dominant — location, scale, establishing
+- EWS (Extreme Wide Shot): vast landscape — epic scope, isolation, scene transitions
+
+CAMERA ANGLES (choose based on emotional intent):
+- Eye level: neutral, natural — default
+- Low angle: subject looks powerful, dominant — authority, heroism, threat
+- High angle: subject looks small, vulnerable — weakness, overview
+- Dutch angle: unease, disorientation — tension, chaos
+- OTS (Over-the-Shoulder): viewer positioned with character — conversations
+
+CONTINUITY RULES (enforce across ALL scenes):
+1. 180-degree rule: imagine an axis through the subject. ALL camera positions must stay on ONE side of that axis. If shot 1 shows subject facing right, shots 2-4 must also show subject facing right. Never flip.
+2. Screen direction: if a subject moves left-to-right in one scene, maintain that direction in the next. Reversing implies they turned around.
+3. Shot variety: NEVER use the same shot type (ECU/CU/MS/WS etc.) twice in a row. Alternate between tight and wide.
+4. Establishing first: first scene should use WS or wider to ground the viewer in space, unless the variant demands an ECU hook.
 
 RULES:
 1. Scene count: match variant guide (3-5 scenes)
@@ -131,16 +175,33 @@ RULES:
 4. caption: 2-3 words ONLY. Power words. No articles.
 5. keyWord: ONE word from caption (most impactful, lowercase)
 6. frames = seconds * 30 (integer)
-7. visualPrompt: cinematic, specific, NO text overlays, 9:16 portrait, slow motion, photorealistic
-8. First scene beat = "hook". Last scene beat = "cta".
-9. zoomDir: vary — never same direction twice in a row
+7. visualPrompt: 40-80 words, cinematic, concrete subjects (not vague), NO text overlays, MUST include the visual theme palette/lighting/lens/filmLook from Step 1, end with "cinematic 1080p, 9:16 vertical"
+8. composition: shot type + angle from SHOT TYPES list above (e.g. "ECU, low angle" / "WS, eye level" / "CU, OTS")
+9. cameraMove: specific move (locked / slow dolly in / slow dolly out / tracking / crane up / handheld / static)
+10. First scene beat = "hook". Last scene beat = "cta".
+11. zoomDir: vary — never same direction twice in a row
+12. Respect continuity rules — note which side of the 180-degree axis each scene uses
 
-Return ONLY valid JSON:
+Return ONLY valid JSON (no markdown, no explanation):
 {
   "visualStyle": "dark-cinematic",
   "musicMood": "tense",
+  "visualTheme": {
+    "palette": "deep navy, electric blue, white highlights",
+    "lighting": "rim light from behind, warm amber key, deep shadows",
+    "lens": "shallow depth of field, 35mm full-frame look",
+    "filmLook": "subtle 16mm grain, muted saturation, 3200K warm temperature",
+    "motion": "slow dolly push-ins, locked establishing shots"
+  },
   "scenes": [
-    { "id": "s1", "beat": "hook", "seconds": 4, "frames": 120, "narration": "...", "visualPrompt": "...", "caption": "EXAMPLE HOOK", "keyWord": "hook", "zoomDir": "in", "captionStyle": "impact" }
+    {
+      "id": "s1", "beat": "hook", "seconds": 4, "frames": 120,
+      "narration": "...",
+      "composition": "ECU, slightly low angle",
+      "cameraMove": "slow dolly in",
+      "visualPrompt": "Extreme close-up slightly low angle of [concrete subject], [specific action], [lighting from visual theme], [lens character], [film look], [palette colors visible], cinematic 1080p, 9:16 vertical",
+      "caption": "HOOK WORD", "keyWord": "hook", "zoomDir": "in", "captionStyle": "impact"
+    }
   ]
 }`;
 
@@ -155,9 +216,10 @@ Return ONLY valid JSON:
       if (!json) throw new Error("No JSON in Gemini response");
 
       const raw = JSON.parse(json) as {
-        visualStyle?: string;
-        musicMood?:   string;
-        scenes?:      Partial<StoryboardScene>[];
+        visualStyle?:  string;
+        musicMood?:    string;
+        visualTheme?:  Partial<VisualTheme>;
+        scenes?:       Partial<StoryboardScene>[];
       };
 
       if (!raw.scenes?.length) throw new Error("Storyboard has no scenes");
@@ -177,19 +239,31 @@ Return ONLY valid JSON:
           keyWord:      ((s.keyWord    ?? (s.caption ?? "now").split(" ")[0])).toLowerCase(),
           zoomDir:      VALID_ZOOM.includes(s.zoomDir as ZoomDir) ? (s.zoomDir as ZoomDir) : VALID_ZOOM[i % 3],
           captionStyle: VALID_CAPTION.includes(s.captionStyle as CaptionStyle) ? (s.captionStyle as CaptionStyle) : "impact",
+          composition:  s.composition,
+          cameraMove:   s.cameraMove,
         };
       });
+
+      const visualTheme: VisualTheme = {
+        palette:  raw.visualTheme?.palette  ?? "cinematic tones",
+        lighting: raw.visualTheme?.lighting ?? "dramatic rim lighting",
+        lens:     raw.visualTheme?.lens     ?? "shallow depth of field",
+        filmLook: raw.visualTheme?.filmLook ?? "subtle film grain",
+        motion:   raw.visualTheme?.motion   ?? "slow dolly push-ins",
+      };
 
       const fullScript  = scenes.map(s => s.narration).filter(Boolean).join(" ");
       const totalFrames = scenes.reduce((sum, s) => sum + s.frames, 0);
 
       console.log(`[storyboard] ${scenes.length} scenes, ${totalFrames}f (${(totalFrames / 30).toFixed(1)}s), style=${raw.visualStyle}`);
+      console.log(`[storyboard] Theme: ${visualTheme.palette} | ${visualTheme.lighting}`);
       console.log(`[storyboard] Script (${fullScript.split(" ").length}w): ${fullScript.slice(0, 80)}...`);
 
       return {
         topic,
-        visualStyle: (raw.visualStyle ?? "dark-cinematic") as VisualStyle,
-        musicMood:   (raw.musicMood   ?? "tense") as MusicMood,
+        visualStyle:  (raw.visualStyle ?? "dark-cinematic") as VisualStyle,
+        musicMood:    (raw.musicMood   ?? "tense") as MusicMood,
+        visualTheme,
         totalFrames,
         fullScript,
         scenes,
@@ -228,6 +302,14 @@ Return ONLY valid JSON:
     const fullScript  = scenes.map(s => s.narration).join(" ");
     const totalFrames = scenes.reduce((sum, s) => sum + s.frames, 0);
 
-    return { topic, visualStyle: "dark-cinematic", musicMood: "tense", totalFrames, fullScript, scenes };
+    const fallbackTheme: VisualTheme = {
+      palette:  "deep charcoal #1a1a2e, electric indigo #6366f1, white #f8fafc",
+      lighting: "dramatic rim light from behind, deep shadows, high contrast",
+      lens:     "shallow depth of field, 35mm full-frame look, subtle bokeh",
+      filmLook: "subtle 16mm grain, muted saturation, cool 5500K tone",
+      motion:   "slow dolly push-ins, locked establishing shots",
+    };
+
+    return { topic, visualStyle: "dark-cinematic", musicMood: "tense", visualTheme: fallbackTheme, totalFrames, fullScript, scenes };
   }
 }

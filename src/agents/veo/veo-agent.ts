@@ -58,12 +58,32 @@ export class VeoAgent {
     outPath:   string,
     durationS: number
   ): Promise<string | null> {
-    if (!this.ai) return null;
-    if (fs.existsSync(outPath)) return outPath;
+    if (!this.ai) {
+      console.warn("[veo] GOOGLE_API_KEY not set — skipping clip generation");
+      return null;
+    }
+    if (fs.existsSync(outPath)) {
+      console.log(`[veo] Using cached clip: ${path.basename(outPath)}`);
+      return outPath;
+    }
+    // veo-3.1-lite-generate-preview only accepts 4 or 8 seconds — snap to nearest valid value
+    const safeDuration = durationS <= 6 ? 4 : 8;
+    if (safeDuration !== durationS) {
+      console.log(`[veo] Snapping duration ${durationS}s → ${safeDuration}s (model constraint)`);
+    }
     try {
-      return await this.generateFromText(prompt, outPath, durationS);
+      return await this.generateFromText(prompt, outPath, safeDuration);
     } catch (err) {
-      console.error(`[veo] generateSingleClip failed: ${err instanceof Error ? err.message : err}`);
+      const msg   = err instanceof Error ? err.message : String(err);
+      // Capture full error object for API errors (quota, model access, etc.)
+      let detail  = msg;
+      try {
+        const asStr = JSON.stringify(err);
+        if (asStr !== "{}") detail = asStr;
+      } catch { /* non-serialisable */ }
+      console.error(`[veo] generateSingleClip FAILED — model=${VEO_MODEL} duration=${safeDuration}s path=${path.basename(outPath)}`);
+      console.error(`[veo] error.message: ${msg}`);
+      if (detail !== msg) console.error(`[veo] error.detail: ${detail.slice(0, 1000)}`);
       return null;
     }
   }
@@ -170,20 +190,32 @@ export class VeoAgent {
       operation = await this.ai!.operations.getVideosOperation({ operation });
     }
 
-    if (operation.error) throw new Error(`Veo operation failed: ${JSON.stringify(operation.error)}`);
+    if (operation.error) {
+      const errJson = JSON.stringify(operation.error);
+      console.error(`[veo] operation error: ${errJson}`);
+      throw new Error(`Veo operation failed: ${errJson}`);
+    }
 
     const generated = operation.response?.generatedVideos?.[0];
-    if (!generated?.video) throw new Error("Veo returned no video");
+    if (!generated?.video) {
+      const respJson = JSON.stringify(operation.response ?? {}).slice(0, 500);
+      console.error(`[veo] no video in response. operation.done=${operation.done} response=${respJson}`);
+      throw new Error("Veo returned no video in response");
+    }
 
     const { videoBytes, uri } = generated.video;
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
 
     if (videoBytes) {
       fs.writeFileSync(outPath, Buffer.from(videoBytes, "base64"));
+      console.log(`[veo] wrote ${(Buffer.from(videoBytes,"base64").length/1024/1024).toFixed(1)}MB from videoBytes`);
     } else if (uri) {
+      console.log(`[veo] downloading from uri: ${uri.slice(0, 80)}`);
       const res = await fetch(uri);
-      if (!res.ok) throw new Error(`Failed to download video: ${res.statusText}`);
-      fs.writeFileSync(outPath, Buffer.from(await res.arrayBuffer()));
+      if (!res.ok) throw new Error(`Failed to download video from uri: HTTP ${res.status} ${res.statusText}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      fs.writeFileSync(outPath, buf);
+      console.log(`[veo] downloaded ${(buf.length/1024/1024).toFixed(1)}MB`);
     } else {
       throw new Error("Veo response has neither videoBytes nor uri");
     }

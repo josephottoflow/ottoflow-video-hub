@@ -16,6 +16,9 @@ export const V2UGCVideo: React.FC<V2UGCProps> = ({ data }) => {
   if (data.storyboard?.scenes?.length) {
     const { storyboard } = data;
     const tokens = VISUAL_STYLE_TOKENS[storyboard.visualStyle] ?? VISUAL_STYLE_TOKENS["dark-cinematic"];
+    // Use first hex color from visualTheme.palette as highlight if available (matches Veo/Imagen3 prompts)
+    const paletteHex = storyboard.visualTheme?.palette?.match(/#[0-9a-fA-F]{6}/)?.[0];
+    const highlightColor = paletteHex ?? tokens.highlightColor;
 
     let frameOffset = 0;
     return (
@@ -33,7 +36,7 @@ export const V2UGCVideo: React.FC<V2UGCProps> = ({ data }) => {
                 durationFrames={scene.frames}
                 zoomDirection={scene.zoomDir}
                 captionStyle={scene.captionStyle}
-                highlightColor={tokens.highlightColor}
+                highlightColor={highlightColor}
                 overlayColor={tokens.overlayColor}
                 overlayOpacity={tokens.overlayAlpha}
               />

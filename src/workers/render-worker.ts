@@ -28,6 +28,25 @@ const CONCURRENCY      = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
 const HEARTBEAT_MS     = 180_000;   // 3 min — matches advanced worker; reduces idle Redis commands
 const OOM_RSS_LIMIT_MB = 1_400;     // reject new jobs above this threshold and schedule restart
 
+function probeEnv(): void {
+  const check = (key: string, label?: string) =>
+    `${label ?? key}: ${process.env[key] ? "✓" : "✗ MISSING"}`;
+  const redisUrl = (process.env.REDIS_URL ?? "").replace(/:[^:@]+@/, ":***@");
+  console.log("[worker] ══════════════════════ ENV PROBE ══════════════════════");
+  console.log(`[worker]   ${check("GOOGLE_API_KEY",     "Gemini + Veo (AI brain + video gen)")}`);
+  console.log(`[worker]   ${check("ELEVENLABS_API_KEY", "ElevenLabs voiceover")}`);
+  console.log(`[worker]   ${check("JAMENDO_CLIENT_ID",  "Jamendo music")}`);
+  console.log(`[worker]   ${check("TELEGRAM_BOT_TOKEN", "Telegram delivery")}`);
+  console.log(`[worker]   ${check("TELEGRAM_CHAT_ID",   "Telegram chat")}`);
+  console.log(`[worker]   ${check("R2_ACCOUNT_ID",      "Cloudflare R2 uploads")}`);
+  console.log(`[worker]   REDIS_URL: ${redisUrl || "✗ MISSING"}`);
+  console.log(`[worker]   UPSTASH_URL: ${process.env.UPSTASH_URL ? "✓" : "(not set — logs go to REDIS_URL)"}`);
+  console.log(`[worker]   PORT: ${process.env.PORT ?? "3000 (default)"}`);
+  console.log(`[worker]   WORKER_CONCURRENCY: ${CONCURRENCY}`);
+  console.log(`[worker]   OOM_RSS_LIMIT_MB: ${OOM_RSS_LIMIT_MB}`);
+  console.log("[worker] ════════════════════════════════════════════════════════");
+}
+
 // Serve public/ on localhost:3000 so Remotion Chrome can fetch background files.
 // Falls back silently if Next.js dev server already holds the port.
 function startStaticServer() {
@@ -159,8 +178,13 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
   // Routing: v2-ugc template implies v2 orchestrator even if version field is absent
   const effectiveVersion = version ?? (template === "v2-ugc" ? "v2" : "v1");
 
-  console.log(`\n[worker] ── Job ${dbJobId} ──`);
-  console.log(`[worker] Topic: ${topic} | Template: ${template} | Version: ${effectiveVersion} | Variant: ${renderVariant ?? "default"} | Row: ${rowIndex}${musicVibe ? ` | Vibe: ${musicVibe}` : ""} | RSS: ${rssMb}MB`);
+  console.log(`\n[worker] ════════════════════ JOB START ════════════════════`);
+  console.log(`[worker] Job ID : ${dbJobId}`);
+  console.log(`[worker] Topic  : ${topic}`);
+  console.log(`[worker] Row    : ${rowIndex} | Template: ${template} | Version: ${effectiveVersion}`);
+  console.log(`[worker] Variant: ${renderVariant ?? "default"} | Hook: ${(job.data as {hookStyle?:string}).hookStyle ?? "default"} | Vibe: ${musicVibe ?? "default"}`);
+  console.log(`[worker] Memory : RSS=${rssMb}MB | Limit=${OOM_RSS_LIMIT_MB}MB`);
+  console.log(`[worker] ═══════════════════════════════════════════════════`);
 
   // Check if this job was killed via the UI before we start any work
   try {
@@ -235,6 +259,7 @@ async function processJob(job: Job<RenderJobData>): Promise<void> {
 }
 
 async function startup() {
+  probeEnv();
   startStaticServer();
   await checkRedis();
 

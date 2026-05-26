@@ -38,13 +38,22 @@ export const storyboardSceneSchema = z.object({
   videoClipPath: z.string().optional(),
 });
 
+export const visualThemeSchema = z.object({
+  palette:  z.string(),
+  lighting: z.string(),
+  lens:     z.string(),
+  filmLook: z.string(),
+  motion:   z.string(),
+});
+
 export const storyboardSchema = z.object({
-  topic:       z.string(),
-  visualStyle: z.enum(["dark-cinematic", "bright-minimal", "neon-tech", "warm-story", "high-contrast"]).default("dark-cinematic"),
-  musicMood:   z.enum(["tense", "uplifting", "mysterious", "energetic", "calm"]).default("tense"),
-  totalFrames: z.number(),
-  fullScript:  z.string(),
-  scenes:      z.array(storyboardSceneSchema),
+  topic:        z.string(),
+  visualStyle:  z.enum(["dark-cinematic", "bright-minimal", "neon-tech", "warm-story", "high-contrast"]).default("dark-cinematic"),
+  musicMood:    z.enum(["tense", "uplifting", "mysterious", "energetic", "calm"]).default("tense"),
+  visualTheme:  visualThemeSchema.optional(),
+  totalFrames:  z.number(),
+  fullScript:   z.string(),
+  scenes:       z.array(storyboardSceneSchema),
 });
 
 export const v2UGCSchema = z.object({
