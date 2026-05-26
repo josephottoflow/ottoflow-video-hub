@@ -38,13 +38,14 @@ export interface ScriptTask {
 // ─── Style → tone guide ──────────────────────────────────────
 
 const STYLE_TONE: Record<string, string> = {
-  educational:       "Clear, approachable, informative. Build trust. Teach one thing well.",
-  motivational:      "High energy, direct, inspiring. Short punchy sentences. Drive action.",
-  "case study":      "Data-driven, credible, storytelling format. Problem → Solution → Result.",
-  lifestyle:         "Conversational, authentic, relatable. Talk like a friend, not a brand.",
-  "startup-focused": "Bold, visionary, confident. Future-focused language. Build excitement.",
-  luxury:            "Elegant, aspirational, exclusive. Slow, deliberate pacing.",
-  neon:              "Fun, playful, high-energy. Short sentences. Use contrast and surprise.",
+  educational:       "Creator-teacher energy — like explaining something to a smart friend over coffee. Conversational. One idea only. No fluff.",
+  motivational:      "Raw creator urgency — real talk, not hype. Short punchy sentences. Sounds like a creator who genuinely cares, not a motivational speaker.",
+  "case study":      "Documentary confessional — 'here's what actually happened'. Data feels discovered, not presented. Storytelling over facts-listing.",
+  lifestyle:         "Authentic vlog energy — talking while doing something. Casual, direct, first-person. Sounds like a friend who just figured something out.",
+  "startup-focused": "Founder confession — bold and direct. 'We almost failed because of this.' Feels like inside knowledge being shared for the first time.",
+  luxury:            "Understated creator wealth — not flashy. Confident and specific. Describes real experiences, not aspirations.",
+  neon:              "High-energy creator — short bursts, pattern interrupts. Feels like a creator who can't wait to share this.",
+  cinematic:         "Documentary narrator meets TikTok creator — emotionally grounded, measured pace with sudden reveals. Feels like a short film with creator energy.",
 };
 
 // ─── Human voice rules (applied in prompt + post-processed) ──
@@ -60,7 +61,14 @@ HUMAN VOICE RULES — non-negotiable:
 - No passive voice. "Companies lose money" not "money is lost by companies".
 - Direct address: say "you" and "your" constantly. Make it personal.
 - Specific beats generic. "Amazon cut costs by 90 percent" beats "significant cost reduction".
-- End with energy, not a whimper. The last sentence should land hard.`;
+- End with energy, not a whimper. The last sentence should land hard.
+- Start with "Okay", "So", "Look", "Here's the thing", "POV:", "Honest confession:", "Nobody tells you this" — creator-native openers that feel unscripted.
+- Use rhetorical questions mid-script: "right?", "you know what I mean?", "sound familiar?" — these create a conversation, not a monologue.
+- Numbers beat adjectives: "3 years" not "several years", "$40k" not "a lot of money", "11pm" not "late at night".
+- Pause beats: use "..." deliberately — signals a breath, a realization, a moment the viewer needs to sit with.
+- Drop into specifics suddenly — one unexpected concrete detail makes everything else believable.
+- Never explain the hook — just deliver it and move on. Trust the audience.
+- The CTA should feel like the creator genuinely wants them there, not marketing copy. "I post this stuff every week" beats "follow for more content".`;
 
 // ─── Post-processor: strip any em-dashes that slip through ───
 
@@ -89,12 +97,12 @@ export type HookStyle =
   | "story"          // open mid-story
 
 const HOOK_STYLE_GUIDE: Record<HookStyle, string> = {
-  "question":       "Open with a compelling question the audience desperately wants answered. Make them feel it's about them.",
-  "bold-statement": "Make a bold, slightly provocative claim. Confident, no hedging. Should feel controversial but true.",
-  "conflict":       "Open with a tension or problem that immediately creates narrative pull. Viewers need to know the resolution.",
-  "promise":        "Lead with a clear, specific benefit. Tell them exactly what they'll get if they watch. No vague promises.",
-  "shock":          "Hit with a surprising statistic, fact, or counterintuitive truth. The more unexpected the better.",
-  "story":          "Start in the middle of a story. Drop the viewer into a moment already happening. Create instant immersion.",
+  "question":       "Ask the question your audience is embarrassed to admit they have. Direct, slightly uncomfortable, immediately relatable. 'Be honest — how many of you...' or 'Has anyone else noticed that...' — makes viewer feel seen before you've said anything else.",
+  "bold-statement": "Drop a genuine creator opinion. Sounds slightly controversial but instantly true. Like a conviction, not a claim. 'The reason most people fail at X is actually Y.' — the creator has lived this, not studied it.",
+  "conflict":       "Name a contradiction the audience lives with. Something they sense but haven't articulated. Creates instant pattern interrupt and narrative tension — viewer has to keep watching to resolve it.",
+  "promise":        "Specific creator-credibility promise. First-person proof. 'I went from X to Y using one framework' — concrete transformation, not vague aspiration. The specificity is what makes it believable.",
+  "shock":          "Stat or fact delivered mid-conversation — reactive energy, like the creator just found it. Not presented, discovered. The emotion of the discovery matters as much as the number itself.",
+  "story":          "POV cold open into a specific moment. Time, place, sensory detail. 'It's 2am, I'm staring at [specific thing]...' — viewer is dropped into the scene, not introduced to it.",
 };
 
 // ─── Story arc structure (TikTok default: Hook → Build → Payoff → CTA) ──
@@ -107,22 +115,22 @@ const STORY_ARC = `Story arc (12 seconds spoken, 3 beats — video is 20s so lea
   Beat 3 (10-12s) CTA: One sentence max. Save, follow, or comment.`;
 
 const VARIANT_ARC: Record<RenderVariant, string> = {
-  "problem-first": `Story arc (12s spoken, 3 beats):
-  Beat 1 (0-3s)   HOOK: Open with the pain point. One sentence. Stop the scroll.
-  Beat 2 (3-10s)  ESCALATE: Why it's worse than they think. Get specific.
-  Beat 3 (10-12s) FIX: One clear simple solution. End with a soft CTA.`,
-  "stat-first": `Story arc (12s spoken, 3 beats):
-  Beat 1 (0-3s)   HOOK: Drop a shocking specific number or percentage. Nothing else.
-  Beat 2 (3-10s)  CONTEXT: What that number means and why they should care.
-  Beat 3 (10-12s) ACTION: Exactly how to use this insight. Save-worthy.`,
-  "story-arc": `Story arc (12s spoken, 3 beats):
-  Beat 1 (0-3s)   HOOK: "I used to [struggle with X]..." — drop into the story mid-scene.
-  Beat 2 (3-10s)  TURN: "Then I discovered [insight]" — the moment everything changed.
-  Beat 3 (10-12s) RESULT: "Now [specific measurable result]" — make them want it.`,
-  "myth-bust": `Story arc (12s spoken, 3 beats):
-  Beat 1 (0-3s)   HOOK: "Everyone thinks [common belief] but..." — create instant dissonance.
-  Beat 2 (3-10s)  REALITY: "The truth is [Y]" — deliver the counterintuitive fact.
-  Beat 3 (10-12s) WIN: "Here's what actually works." — land strong, no hedging.`,
+  "problem-first": `Story arc — TikTok pacing, spoken not written:
+  Beat 1 HOOK (0-3s):   Name the exact pain. First-person or direct address. "You've been doing X wrong." Short. No setup.
+  Beat 2 ESCALATE (3-10s): Get specific and emotional. Why it costs them. One concrete example or number. Make them feel it.
+  Beat 3 FLIP (10-12s): The simple truth they missed. Lands like a reveal. Soft CTA feels earned, not tacked on.`,
+  "stat-first": `Story arc — data as storytelling device:
+  Beat 1 HOOK (0-3s):   Drop the number cold. Nothing else. Let it land. Reactive delivery, not polished.
+  Beat 2 CONTEXT (3-10s): What this number actually means for them. Make it personal. One relatable consequence they haven't thought about.
+  Beat 3 ACTION (10-12s): The one thing they can do right now. Specific. Actionable. Save-worthy.`,
+  "story-arc": `Story arc — creator confession format:
+  Beat 1 HOOK (0-3s):   Drop into the story mid-moment. "It was [specific time/place] and I was..." — not a setup, the scene itself.
+  Beat 2 TURN (3-10s):  The moment everything changed. One specific discovery or realization. Feels earned, not scripted.
+  Beat 3 RESULT (10-12s): Where it led. Concrete and specific. Invites them into the same possibility without overselling it.`,
+  "myth-bust": `Story arc — creator truth-drop format:
+  Beat 1 HOOK (0-3s):   State the bad advice everyone gives. Sounds frustrated, not academic. Short and direct.
+  Beat 2 REALITY (3-10s): The actual truth. One clear counterintuitive fact. Backed by something specific. The creator has tested this.
+  Beat 3 WIN (10-12s):  What works instead. Direct. No hedging. Ends with genuine CTA, not a slogan.`,
 };
 
 // ─── Script Writer Agent ──────────────────────────────────────
