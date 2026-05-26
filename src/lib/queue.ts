@@ -69,6 +69,27 @@ export function getRenderQueue(): Queue<RenderJobData> {
 }
 
 export async function enqueueRender(data: RenderJobData): Promise<string> {
+  // When WORKER_QUEUE_URL is set (Vercel production), proxy through the Railway
+  // worker's HTTP endpoint so BullMQ uses Railway's internal Redis, not Upstash.
+  const workerUrl = process.env.WORKER_QUEUE_URL;
+  if (workerUrl) {
+    const res = await fetch(`${workerUrl}/api/queue`, {
+      method:  "POST",
+      headers: {
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${process.env.NEXTAUTH_SECRET || ""}`,
+      },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`Worker queue HTTP ${res.status}: ${text}`);
+    }
+    const json = await res.json() as { jobId: string };
+    return json.jobId;
+  }
+
+  // Direct BullMQ path — used by the worker process itself and local dev.
   const delay = data.scheduledAt && data.scheduledAt > Date.now()
     ? data.scheduledAt - Date.now()
     : undefined;

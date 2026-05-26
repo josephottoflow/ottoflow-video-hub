@@ -85,13 +85,26 @@ function startStaticServer() {
             const payload = JSON.parse(body) as {
               rowIndex: number; topic: string; style?: string;
               template?: string; version?: "v1" | "v2";
+              dbJobId?: string; renderVariant?: string; hookStyle?: string;
+              musicVibe?: string; sheetName?: string; scheduledAt?: number;
             };
-            const { rowIndex, topic, style = "Educational", version } = payload;
-            const template = payload.template ?? await RenderAgent.selectTemplate(topic, style);
-            const job = await createJob(rowIndex, topic, template, { version: version ?? "v1" });
-            await enqueueRender({ rowIndex, template, topic, dbJobId: job.id });
+            const { rowIndex, topic, style = "Educational", version,
+                    renderVariant, hookStyle, musicVibe, sheetName, scheduledAt } = payload;
+            // When dbJobId is supplied (Vercel already created the DB record),
+            // skip createJob and go straight to BullMQ enqueue.
+            let dbJobId = payload.dbJobId;
+            let template = payload.template;
+            if (!dbJobId) {
+              template = template ?? await RenderAgent.selectTemplate(topic, style);
+              const job = await createJob(rowIndex, topic, template!, { version: version ?? "v1" });
+              dbJobId = job.id;
+            }
+            template = template ?? await RenderAgent.selectTemplate(topic, style);
+            await enqueueRender({ rowIndex, template: template!, topic, dbJobId,
+                                   version, renderVariant: renderVariant as any,
+                                   hookStyle, musicVibe, sheetName, scheduledAt });
             res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ success: true, jobId: job.id, template }));
+            res.end(JSON.stringify({ success: true, jobId: dbJobId, template }));
           } catch (e) {
             res.writeHead(500, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }));
