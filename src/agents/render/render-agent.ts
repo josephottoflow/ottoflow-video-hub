@@ -120,15 +120,29 @@ export class RenderAgent {
         jpegQuality: 75,
         // Single Chrome instance — halves the Chromium RSS on Railway's 512MB free tier
         concurrency: 1,
-        // Scale down to 720p portrait — reduces Remotion's internal FFmpeg frame buffer
-        // memory by ~56% vs 1080×1920. FFmpegAgent rescales back to 1080×1920 in post.
-        width:  720,
-        height: 1280,
+        // scale=2/3 → Chrome renders JPEG frames at 720×1280 instead of 1080×1920,
+        // cutting per-frame buffer sizes ~56%. FFmpegAgent upscales back to 1080×1920.
+        scale: 2 / 3,
         // Cap video bitrate so libx264 uses fewer reference frame buffers
         videoBitrate: "2M",
+        // Disable parallel encoding pipeline (saves ~50-100 MB peak)
+        disallowParallelEncoding: true,
         timeoutInMilliseconds: 120_000,
         // Software GL for containerised Linux (no GPU on Railway/cloud)
         chromiumOptions: process.platform === "linux" ? { gl: "swangle" } : undefined,
+        // Force x264 to 1 thread — default 60-thread lookahead at 1080×1920 was the
+        // primary OOM source (60 threads × 40-frame lookahead × 6 MB/frame = GBs).
+        ffmpegOverride: ({ args }) => {
+          const idx = args.indexOf("libx264");
+          if (idx !== -1) {
+            return [
+              ...args.slice(0, idx + 1),
+              "-x264-params", "threads=1:lookahead_threads=1",
+              ...args.slice(idx + 1),
+            ];
+          }
+          return args;
+        },
         onProgress: ({ progress }) => {
           const pct = Math.round(progress * 100);
           if (pct >= lastPct + 10) {
