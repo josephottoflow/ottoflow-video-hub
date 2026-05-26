@@ -44,7 +44,7 @@ function clampVeoDuration(seconds: number): number {
   return Math.max(4, Math.min(8, seconds));
 }
 
-const SHEET_NAME = "Video Gen";
+const SHEET_NAME = "Video Gen — Advance Tier";
 
 // Generates a ~32-word script from a topic without any AI API.
 // Used when ScriptWriter fails (no ANTHROPIC_API_KEY) and no script is in the sheet.
@@ -55,7 +55,7 @@ function templateScript(topic: string): string {
 }
 
 export class PipelineOrchestratorV2 {
-  private sheets       = new SheetsClient(SHEET_NAME);
+  private sheets       = new SheetsClient(SHEET_NAME, "v2-advanced");
   private renderAgent  = new RenderAgent();
   private approvalBot  = new TelegramApprovalBot();
   private seoGen       = new SeoGenerator();
@@ -117,6 +117,9 @@ export class PipelineOrchestratorV2 {
     fs.mkdirSync(tempDir, { recursive: true });
     fs.mkdirSync(outDir,  { recursive: true });
 
+    const TRACE = (msg: string) => emitLog("V2-Orchestrator", `[TRACE] ${msg}`, "info");
+    const TRACE_ERR = (msg: string) => emitLog("V2-Orchestrator", `[TRACE][ERROR] ${msg}`, "error");
+
     let pipelineResult: PipelineResult;
     try {
       await this.sheets.updateStatus(rowIndex, "Processing");
@@ -125,6 +128,8 @@ export class PipelineOrchestratorV2 {
       // ── Step 1: Generate dynamic storyboard (Gemini creative director) ──────
       let _t = Date.now();
       emitLog("V2-Orchestrator", `Building storyboard (variant: ${renderVariant ?? "problem-first"}, hook: ${hookStyle ?? "shock"}) | tempDir=${tempDir} | staticPort=${process.env.PORT || "3000"} | Veo=${VeoAgent.isAvailable()} | ElevenLabs=${!!process.env.ELEVENLABS_API_KEY} | R2=${isR2Available()}`, "agent");
+      TRACE(`Providers: GOOGLE_API_KEY=${!!process.env.GOOGLE_API_KEY} ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY} ELEVENLABS=${!!process.env.ELEVENLABS_API_KEY} JAMENDO=${!!process.env.JAMENDO_CLIENT_ID} R2=${isR2Available()} D_ID=${!!process.env.D_ID_API_KEY}`);
+      TRACE(`Sheet row: rowIndex=${rowIndex} topic="${row.topic}" style="${row.style}" voice="${row.voice}" scriptLen=${row.script?.length ?? 0}`);
       const sb: Storyboard = await this.storyboard.generate(
         row.topic, row.style,
         renderVariant ?? "problem-first",
@@ -132,6 +137,8 @@ export class PipelineOrchestratorV2 {
         row.script?.trim() || undefined   // seed Gemini with existing sheet script
       );
       emitLog("V2-Orchestrator", `Storyboard done in ${Date.now()-_t}ms — ${sb.scenes.length} scenes, ${(sb.totalFrames / 30).toFixed(1)}s, style=${sb.visualStyle}`, "success");
+      TRACE(`Storyboard scenes: ${sb.scenes.map(s => `${s.id}(${s.beat},${s.seconds}s)`).join(" | ")}`);
+      TRACE(`Full script (${sb.fullScript.split(" ").length}w): "${sb.fullScript}"`);
       _t = Date.now();
       setStatus("running", row.topic, 15);
 
@@ -160,11 +167,16 @@ export class PipelineOrchestratorV2 {
       fs.mkdirSync(publicContent, { recursive: true });
 
       emitLog("V2-Orchestrator", "Generating voiceover...", "info");
+      TRACE(`Voiceover: ElevenLabs available=${!!process.env.ELEVENLABS_API_KEY} voice="${row.voice}" scriptWords=${sb.fullScript.split(" ").length}`);
+      _t = Date.now();
       const voicePath = await this.voiceover.generate(sb.fullScript, tempDir, row.voice) ?? undefined;
       if (voicePath) {
+        const voiceSizeKb = Math.round(fs.statSync(voicePath).size / 1024);
         emitLog("V2-Orchestrator", "Voiceover ready", "success");
+        TRACE(`Voiceover done in ${Date.now()-_t}ms — ${voiceSizeKb}KB at ${voicePath}`);
       } else {
         emitLog("V2-Orchestrator", "⚠️ Voiceover skipped — check ELEVENLABS_API_KEY. Video will be silent.", "warning");
+        TRACE(`Voiceover skipped in ${Date.now()-_t}ms — no file produced`);
       }
       setStatus("running", row.topic, 28);
 
@@ -175,40 +187,51 @@ export class PipelineOrchestratorV2 {
       const localPort = process.env.PORT || "3000";
       if (VeoAgent.isAvailable()) {
         emitLog("V2-Orchestrator", `Generating ${sb.scenes.length} Veo clips...`, "info");
+        TRACE(`Veo: model=veo-3.1-lite-generate-preview scenes=${sb.scenes.length} GOOGLE_API_KEY=${process.env.GOOGLE_API_KEY ? process.env.GOOGLE_API_KEY.slice(0,8)+"..." : "MISSING"}`);
+        _t = Date.now();
         await Promise.all(sb.scenes.map(async (scene, i) => {
-          const outFile = `clip-${scene.id}.mp4`;
-          const outPath = path.join(tempDir, outFile);
-          const veoDur  = clampVeoDuration(scene.seconds);
+          const outFile  = `clip-${scene.id}.mp4`;
+          const outPath  = path.join(tempDir, outFile);
+          const veoDur   = clampVeoDuration(scene.seconds);
+          TRACE(`Veo[${i+1}/${sb.scenes.length}] scene=${scene.id} beat=${scene.beat} dur=${veoDur}s prompt="${scene.visualPrompt.slice(0,80)}..."`);
           const clipPath = await this.veo.generateSingleClip(scene.visualPrompt, outPath, veoDur);
           if (clipPath) {
+            const clipSizeMb = (fs.statSync(clipPath).size / 1024 / 1024).toFixed(1);
             let clipUrl: string | undefined;
             if (isR2Available()) {
               try { clipUrl = await uploadFileToR2(`clips/${slug}/${outFile}`, clipPath, "video/mp4"); } catch { /* fall through */ }
             }
             if (!clipUrl) {
-              // Relative paths don't resolve under Remotion's file:// serveUrl.
-              // Use absolute localhost URL so Chrome fetches from the static server.
               try { fs.copyFileSync(clipPath, path.join(publicContent, outFile)); } catch { /* skip */ }
               clipUrl = `http://localhost:${localPort}/content/${slug}/${outFile}`;
             }
             clipUrlMap[scene.id] = clipUrl;
             emitLog("V2-Orchestrator", `Veo clip ${i + 1}/${sb.scenes.length} — ${scene.beat} (${veoDur}s) → ${clipUrl}`, "success");
+            TRACE(`Veo[${i+1}] SUCCESS: ${clipSizeMb}MB → ${clipUrl}`);
           } else {
             emitLog("V2-Orchestrator", `Veo scene ${scene.id} failed — will use Imagen3`, "warning");
+            TRACE_ERR(`Veo[${i+1}] FAILED: scene=${scene.id} beat=${scene.beat} — check [veo] log lines above for API error detail`);
           }
         }));
+        TRACE(`Veo batch done in ${Date.now()-_t}ms — ${Object.keys(clipUrlMap).length}/${sb.scenes.length} clips generated. Missing: ${sb.scenes.filter(s=>!clipUrlMap[s.id]).map(s=>s.id).join(",")||"none"}`);
+      } else {
+        TRACE(`Veo SKIPPED — GOOGLE_API_KEY not set`);
       }
 
       // ── Step 4: Imagen3 static fallback for scenes missing a clip ─────────
       const missingScenes = sb.scenes.filter(s => !clipUrlMap[s.id]);
       if (missingScenes.length > 0) {
         emitLog("V2-Orchestrator", `Imagen3 fallback for ${missingScenes.length} scene(s)...`, "info");
+        TRACE(`Imagen3: falling back for scenes: ${missingScenes.map(s=>s.id).join(",")} — model=imagen-3.0-generate-002`);
+        _t = Date.now();
         await Promise.all(missingScenes.map(async (scene) => {
           try {
             const destFile = `scene-${scene.id}.jpg`;
             const outPath  = path.join(tempDir, destFile);
+            TRACE(`Imagen3: generating scene=${scene.id} beat=${scene.beat} prompt="${scene.visualPrompt.slice(0,80)}..."`);
             const imgPath  = await this.imagen3.generateSingleImage(scene.visualPrompt, outPath);
             if (imgPath) {
+              const imgSizeKb = Math.round(fs.statSync(imgPath).size / 1024);
               let imgUrl: string | undefined;
               if (isR2Available()) {
                 try { imgUrl = await uploadFileToR2(`images/${slug}/${destFile}`, imgPath, "image/jpeg"); } catch { /* fall through */ }
@@ -218,11 +241,17 @@ export class PipelineOrchestratorV2 {
                 imgUrl = `http://localhost:${localPort}/content/${slug}/${destFile}`;
               }
               imageUrlMap[scene.id] = imgUrl;
+              TRACE(`Imagen3: SUCCESS scene=${scene.id} ${imgSizeKb}KB → ${imgUrl}`);
+            } else {
+              TRACE_ERR(`Imagen3: scene=${scene.id} returned null — scene will render with gradient background only`);
             }
           } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
             emitLog("V2-Orchestrator", `⚠️ Imagen3 failed for ${scene.id} — scene will use gradient background`, "warning");
+            TRACE_ERR(`Imagen3 EXCEPTION scene=${scene.id}: ${msg}`);
           }
         }));
+        TRACE(`Imagen3 batch done in ${Date.now()-_t}ms — ${Object.keys(imageUrlMap).length} images. Missing assets: ${missingScenes.filter(s=>!imageUrlMap[s.id]).map(s=>s.id).join(",")||"none"}`);
       }
       setStatus("running", row.topic, 55);
 
@@ -291,12 +320,18 @@ export class PipelineOrchestratorV2 {
       setStatus("running", row.topic, 65);
 
       _t = Date.now();
+      TRACE(`Pre-render state: clips=${Object.keys(clipUrlMap).length}/${sb.scenes.length} images=${Object.keys(imageUrlMap).length} voiceover=${!!voicePath} music=${!!musicTrack} tempDir=${tempDir}`);
+      TRACE(`Scenes with video: ${storyboardData.scenes.filter(s=>s.videoClipPath).map(s=>s.id).join(",") || "NONE"}`);
+      TRACE(`Scenes with image: ${storyboardData.scenes.filter(s=>s.imagePath).map(s=>s.id).join(",") || "NONE"}`);
+      TRACE(`Scenes with NO assets: ${storyboardData.scenes.filter(s=>!s.videoClipPath && !s.imagePath).map(s=>s.id).join(",") || "none — all covered"}`);
       emitLog("V2-Orchestrator", `Remotion render starting — composition=v2-ugc outputDir=${tempDir} scenes=${storyboardData.scenes.length} clipsReady=${Object.keys(clipUrlMap).length} imagesReady=${Object.keys(imageUrlMap).length}`, "info");
       const renderResult = await this.renderAgent.render(slug, videoData, tempDir, "v2-ugc");
       if (!renderResult.success || !renderResult.videoPath) {
+        TRACE_ERR(`Render FAILED: ${renderResult.error}`);
         throw new Error(renderResult.error || "Render failed");
       }
       emitLog("V2-Orchestrator", `Rendered in ${Date.now()-_t}ms — ${((renderResult.fileSizeBytes || 0) / 1024 / 1024).toFixed(1)}MB path=${renderResult.videoPath}`, "success");
+      TRACE(`Render output: ${renderResult.videoPath} exists=${fs.existsSync(renderResult.videoPath)} size=${((renderResult.fileSizeBytes||0)/1024/1024).toFixed(1)}MB`);
       _t = Date.now();
       setStatus("running", row.topic, 78);
 
@@ -305,6 +340,7 @@ export class PipelineOrchestratorV2 {
         : musicTrack ? `music "${musicTrack.name}"` : "no audio";
       emitLog("V2-Orchestrator", `FFmpeg post-processing (minimal grade, ${audioLabel})...`, "info");
 
+      TRACE(`FFmpeg: inputPath=${renderResult.videoPath} voiceover=${voicePath ? "YES" : "NO"} music=${musicTrack?.localPath ? "YES" : "NO"}`);
       const ffResult = await this.ffmpeg.postProcess(renderResult.videoPath, "minimal", {
         voiceoverPath: voicePath,
         musicPath:     musicTrack?.localPath,
@@ -312,22 +348,37 @@ export class PipelineOrchestratorV2 {
 
       let finalVideoPath = renderResult.videoPath;
       if (ffResult.success) {
+        // Delete Remotion's raw MP4 now that FFmpeg has produced the final — frees ~50MB before copy
+        if (ffResult.outputPath !== renderResult.videoPath) {
+          try { fs.unlinkSync(renderResult.videoPath); } catch { /* non-fatal */ }
+        }
         finalVideoPath = ffResult.outputPath;
         emitLog("V2-Orchestrator", `FFmpeg done — ${((ffResult.fileSizeBytes || 0) / 1024 / 1024).toFixed(1)}MB`, "success");
+        TRACE(`FFmpeg output: ${ffResult.outputPath} size=${((ffResult.fileSizeBytes||0)/1024/1024).toFixed(1)}MB durationMs=${ffResult.durationMs}`);
+      } else {
+        TRACE_ERR(`FFmpeg FAILED: ${ffResult.error} — falling back to raw render at ${finalVideoPath}`);
       }
 
       const finalVideo = path.join(outDir, `${slug}.mp4`);
+      TRACE(`Copying ${finalVideoPath} → ${finalVideo}`);
       fs.copyFileSync(finalVideoPath, finalVideo);
+      TRACE(`Final video size: ${(fs.statSync(finalVideo).size/1024/1024).toFixed(1)}MB`);
 
       // Upload final video to R2 for cloud access (Remotion preview + Telegram)
       let outputLink: string = finalVideo;
       if (isR2Available()) {
+        TRACE(`R2 upload: ${finalVideo} → videos/${slug}.mp4`);
         try {
           outputLink = await uploadFileToR2(`videos/${slug}.mp4`, finalVideo, "video/mp4");
           emitLog("V2-Orchestrator", `Uploaded to R2: ${outputLink}`, "success");
+          TRACE(`R2 upload SUCCESS: ${outputLink}`);
         } catch (err) {
-          emitLog("V2-Orchestrator", `R2 upload failed: ${err instanceof Error ? err.message : err}`, "warning");
+          const r2msg = err instanceof Error ? err.message : String(err);
+          emitLog("V2-Orchestrator", `R2 upload failed: ${r2msg}`, "warning");
+          TRACE_ERR(`R2 upload FAILED: ${r2msg} — outputLink remains local path`);
         }
+      } else {
+        TRACE(`R2 skipped — R2_ACCOUNT_ID not set. outputLink=${outputLink}`);
       }
 
       setStatus("running", row.topic, 85);
@@ -338,9 +389,12 @@ export class PipelineOrchestratorV2 {
       setStatus("running", row.topic, 90);
 
       emitLog("V2-Orchestrator", "Sending to Telegram for approval...", "info");
+      const finalVideoSizeMb = (fs.statSync(finalVideo).size / 1024 / 1024).toFixed(1);
+      TRACE(`Telegram upload: ${finalVideo} size=${finalVideoSizeMb}MB TELEGRAM_BOT_TOKEN=${!!process.env.TELEGRAM_BOT_TOKEN}`);
       // Use short job key for Telegram callback (avoids 64-byte limit on long slugs)
       const cbKey = dbJobId ? dbJobId.slice(0, 16) : slug.slice(0, 55);
       const approval = await this.approvalBot.sendVideoForApproval(finalVideo, row.topic, cbKey);
+      TRACE(`Telegram approval decision: ${approval.decision} waitMs=${approval.waitTimeMs}`);
 
       if (approval.decision === "approved" || approval.decision === "timeout") {
         // Auto-approve on timeout — video is already rendered and good to go.

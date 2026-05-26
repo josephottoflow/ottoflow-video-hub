@@ -26,7 +26,9 @@ import { emitLog, inferAgent, inferLevel, setStatus, clearLogs, store } from "..
 
 const CONCURRENCY      = parseInt(process.env.WORKER_CONCURRENCY || "1", 10);
 const HEARTBEAT_MS     = 180_000;   // 3 min — matches advanced worker; reduces idle Redis commands
-const OOM_RSS_LIMIT_MB = 1_400;     // reject new jobs above this threshold and schedule restart
+// Railway free tier is ~512MB. Reject new jobs if RSS is already high so we fail-fast
+// with a useful error instead of being SIGKILL'd mid-render by the OS.
+const OOM_RSS_LIMIT_MB = parseInt(process.env.OOM_RSS_LIMIT_MB || "450", 10);
 
 function probeEnv(): void {
   const check = (key: string, label?: string) =>

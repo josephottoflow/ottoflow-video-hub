@@ -116,11 +116,11 @@ export class RenderAgent {
         outputLocation: outputPath,
         inputProps:  { data: videoData },
         imageFormat: "jpeg",
-        jpegQuality: 90,
-        // 2 Chrome instances — enough parallelism without starving OffthreadVideo decode on large MP4s
-        concurrency: 2,
-        // Per-frame timeout — large Pexels videos (24MB+) need extra seek time
-        timeoutInMilliseconds: 180_000,
+        // Lower quality = smaller per-frame buffers = less peak RAM on free-tier Railway
+        jpegQuality: 75,
+        // Single Chrome instance — halves the Chromium RSS on Railway's 512MB free tier
+        concurrency: 1,
+        timeoutInMilliseconds: 120_000,
         // Software GL for containerised Linux (no GPU on Railway/cloud)
         chromiumOptions: process.platform === "linux" ? { gl: "swangle" } : undefined,
         onProgress: ({ progress }) => {

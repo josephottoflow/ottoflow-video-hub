@@ -64,8 +64,9 @@ export interface ContentRow {
   avatarUrl:        string;  // face image URL for D-ID lipsync (col U)
 }
 
-// === Column Map ===
+// === Column Maps ===
 
+// V1 schema — Sheet1 / "Content Pipeline" (21 columns A–U)
 const COL = {
   topic:           "A",
   script:          "B",
@@ -91,6 +92,30 @@ const COL = {
 } as const;
 
 const LAST_COL = "U";
+
+// V2-Advanced schema — "Video Gen — Advance Tier" (73 columns A–BU)
+// Indices are 0-based from the values array returned by the Sheets API.
+// Data starts at row 4 (rows 1-3 are section/column-name/example headers).
+const V2_COL = {
+  topic:           "B",   // index 1
+  script:          "BL",  // index 63 — Script (Full)
+  hookA:           "K",   // index 10
+  hookB:           "L",   // index 11
+  hookC:           "M",   // index 12
+  voice:           "G",   // index 6
+  style:           "E",   // index 4 — Video Style
+  status:          "BG",  // index 58 — Pipeline Status
+  renderStatus:    "BH",  // index 59
+  outputLink:      "BM",  // index 64 — Output Video URL
+  driveLink:       "BN",  // index 65
+  tiktokStatus:    "BP",  // index 67
+  youtubeStatus:   "BQ",  // index 68
+  instagramStatus: "BR",  // index 69
+  scheduledAt:     "BJ",  // index 61
+  performance:     "BT",  // index 71 — Performance Score
+  notes:           "BU",  // index 72 — used for error messages
+  workerJobId:     "BK",  // index 62
+} as const;
 
 const HEADER_ROW = [
   "Topic", "Script",
@@ -119,11 +144,15 @@ export class SheetsClient {
   private sheets!: sheets_v4.Sheets;
   private spreadsheetId: string;
   private sheetName: string;
+  protected readonly schema: "v1" | "v2-advanced";
+  protected readonly dataStartRow: number;
 
-  constructor(sheetName = "Sheet1") {
+  constructor(sheetName = "Sheet1", schema: "v1" | "v2-advanced" = "v1") {
     const config = getConfig();
     this.spreadsheetId = config.google.spreadsheetId;
     this.sheetName = sheetName;
+    this.schema     = schema;
+    this.dataStartRow = schema === "v2-advanced" ? 4 : 2;
   }
 
   /**
@@ -253,6 +282,10 @@ export class SheetsClient {
     await this.connect();
     await this.ensureSheetExists();
     await this.detectSheetName();
+
+    // v2-advanced sheet already has its 3-row header from the redesign script — don't overwrite
+    if (this.schema === "v2-advanced") return;
+
     const range = `${this.sheetName}!A1:${LAST_COL}1`;
     try {
       const res = await this.sheets.spreadsheets.values.get({
@@ -274,11 +307,13 @@ export class SheetsClient {
   // === Read all rows ===
 
   async getAllContent(): Promise<ContentRow[]> {
-    const range = `${this.sheetName}!A2:${LAST_COL}`;
+    const lastCol = this.schema === "v2-advanced" ? "BU" : LAST_COL;
+    const range   = `${this.sheetName}!A${this.dataStartRow}:${lastCol}`;
     const res = await this.sheets.spreadsheets.values.get({
       spreadsheetId: this.spreadsheetId, range,
     });
-    return (res.data.values || []).map((row, i) => this.parseRow(row, i + 2));
+    const start = this.dataStartRow;
+    return (res.data.values || []).map((row, i) => this.parseRow(row, i + start));
   }
 
   // === Get rows ready to process ===
@@ -299,15 +334,19 @@ export class SheetsClient {
     hookB: string,
     hookC: string
   ): Promise<void> {
+    const scriptCol = this.schema === "v2-advanced" ? V2_COL.script : COL.script;
+    const hookACol  = this.schema === "v2-advanced" ? V2_COL.hookA  : COL.hookA;
+    const hookBCol  = this.schema === "v2-advanced" ? V2_COL.hookB  : COL.hookB;
+    const hookCCol  = this.schema === "v2-advanced" ? V2_COL.hookC  : COL.hookC;
     await this.sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: this.spreadsheetId,
       requestBody: {
         valueInputOption: "RAW",
         data: [
-          { range: `${this.sheetName}!${COL.script}${rowIndex}`, values: [[script]] },
-          { range: `${this.sheetName}!${COL.hookA}${rowIndex}`,  values: [[hookA]] },
-          { range: `${this.sheetName}!${COL.hookB}${rowIndex}`,  values: [[hookB]] },
-          { range: `${this.sheetName}!${COL.hookC}${rowIndex}`,  values: [[hookC]] },
+          { range: `${this.sheetName}!${scriptCol}${rowIndex}`, values: [[script]] },
+          { range: `${this.sheetName}!${hookACol}${rowIndex}`,  values: [[hookA]] },
+          { range: `${this.sheetName}!${hookBCol}${rowIndex}`,  values: [[hookB]] },
+          { range: `${this.sheetName}!${hookCCol}${rowIndex}`,  values: [[hookC]] },
         ],
       },
     });
@@ -316,20 +355,21 @@ export class SheetsClient {
   // === Update master status ===
 
   async updateStatus(rowIndex: number, status: ContentStatus, errorMsg?: string): Promise<void> {
+    const statusCol = this.schema === "v2-advanced" ? V2_COL.status      : COL.status;
+    const errorCol  = this.schema === "v2-advanced" ? V2_COL.notes       : COL.performance;
     await this.sheets.spreadsheets.values.update({
       spreadsheetId: this.spreadsheetId,
-      range: `${this.sheetName}!${COL.status}${rowIndex}`,
+      range: `${this.sheetName}!${statusCol}${rowIndex}`,
       valueInputOption: "RAW",
       requestBody: { values: [[status]] },
     });
 
     if (errorMsg) {
-      // Write error into Performance column for visibility
       await this.sheets.spreadsheets.values.update({
         spreadsheetId: this.spreadsheetId,
-        range: `${this.sheetName}!${COL.performance}${rowIndex}`,
+        range: `${this.sheetName}!${errorCol}${rowIndex}`,
         valueInputOption: "RAW",
-        requestBody: { values: [[`ERROR: ${errorMsg}`]] },
+        requestBody: { values: [[`ERROR: ${errorMsg.slice(0, 500)}`]] },
       });
     }
   }
@@ -387,13 +427,15 @@ export class SheetsClient {
   // === Mark fully complete ===
 
   async markComplete(rowIndex: number, outputLink: string): Promise<void> {
+    const statusCol = this.schema === "v2-advanced" ? V2_COL.status    : COL.status;
+    const outputCol = this.schema === "v2-advanced" ? V2_COL.outputLink : COL.outputLink;
     await this.sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: this.spreadsheetId,
       requestBody: {
         valueInputOption: "RAW",
         data: [
-          { range: `${this.sheetName}!${COL.status}${rowIndex}`,     values: [["Done"]] },
-          { range: `${this.sheetName}!${COL.outputLink}${rowIndex}`,  values: [[outputLink]] },
+          { range: `${this.sheetName}!${statusCol}${rowIndex}`, values: [["Done"]] },
+          { range: `${this.sheetName}!${outputCol}${rowIndex}`, values: [[outputLink]] },
         ],
       },
     });
@@ -441,6 +483,41 @@ export class SheetsClient {
   // === Parse a raw row array into a typed ContentRow ===
 
   private parseRow(row: string[], rowIndex: number): ContentRow {
+    if (this.schema === "v2-advanced") {
+      // 73-column "Video Gen — Advance Tier" schema (A=0-indexed)
+      // IDENTITY: A(0)=RowID  B(1)=Topic
+      // CONTENT DNA: C(2)..M(12) — G(6)=Voice, E(4)=VideoStyle, K(10)=HookA, L(11)=HookB, M(12)=HookC
+      // CINEMATIC: N(13)..S(18)
+      // SCENES 1-5: T(19)..BB(53)
+      // PIPELINE: BC(54)..BK(62) — BG(58)=PipelineStatus, BJ(61)=ScheduledAt, BK(62)=WorkerJobId
+      // OUTPUT: BL(63)..BU(72) — BL(63)=Script, BM(64)=OutputVideoUrl, BT(71)=PerfScore, BU(72)=Notes
+      return {
+        rowIndex,
+        topic:           row[1]  || "",
+        script:          row[63] || "",
+        hookA:           row[10] || "",
+        hookB:           row[11] || "",
+        hookC:           row[12] || "",
+        voice:           row[6]  || "Female energetic",
+        style:           row[4]  || "Educational",
+        status:          (row[58] || "Pending") as ContentStatus,
+        outputLink:      row[64] || "",
+        tiktokStatus:    (row[67] || "Pending") as PlatformStatus,
+        tiktokLink:      "",
+        youtubeStatus:   (row[68] || "Pending") as PlatformStatus,
+        youtubeLink:     "",
+        instagramStatus: (row[69] || "Pending") as PlatformStatus,
+        instagramLink:   "",
+        facebookStatus:  "Pending" as PlatformStatus,
+        facebookLink:    "",
+        dateScheduled:   row[61] || "",
+        timeScheduled:   "",
+        performance:     row[71] || "",
+        avatarUrl:       "",
+      };
+    }
+
+    // V1 schema — Sheet1 / "Content Pipeline" (21 columns A–U)
     return {
       rowIndex,
       topic:           row[0]  || "",

@@ -32,8 +32,14 @@ export class Imagen3Agent {
    * Generate a single image from a text prompt. Returns the output path on success, null on failure.
    */
   async generateSingleImage(prompt: string, outPath: string): Promise<string | null> {
-    if (!this.ai) return null;
-    if (fs.existsSync(outPath)) return outPath;
+    if (!this.ai) {
+      console.warn("[imagen3] GOOGLE_API_KEY not set — skipping image generation");
+      return null;
+    }
+    if (fs.existsSync(outPath)) {
+      console.log(`[imagen3] Using cached image: ${path.basename(outPath)}`);
+      return outPath;
+    }
     try {
       const response = await this.ai.models.generateImages({
         model:  "imagen-3.0-generate-002",
@@ -41,12 +47,26 @@ export class Imagen3Agent {
         config: { numberOfImages: 1, aspectRatio: "9:16", outputMimeType: "image/jpeg" },
       });
       const image = response.generatedImages?.[0];
-      if (!image?.image?.imageBytes) throw new Error("No image bytes returned");
+      if (!image?.image?.imageBytes) {
+        const respSummary = JSON.stringify(response).slice(0, 500);
+        console.error(`[imagen3] no imageBytes in response: ${respSummary}`);
+        throw new Error("Imagen3 returned no image bytes");
+      }
       fs.mkdirSync(path.dirname(outPath), { recursive: true });
-      fs.writeFileSync(outPath, Buffer.from(image.image.imageBytes, "base64"));
+      const buf = Buffer.from(image.image.imageBytes, "base64");
+      fs.writeFileSync(outPath, buf);
+      console.log(`[imagen3] saved ${(buf.length/1024).toFixed(0)}KB → ${path.basename(outPath)}`);
       return outPath;
     } catch (err) {
-      console.error(`[imagen3] generateSingleImage failed: ${err instanceof Error ? err.message : err}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      let detail = msg;
+      try {
+        const asStr = JSON.stringify(err);
+        if (asStr !== "{}") detail = asStr;
+      } catch { /* non-serialisable */ }
+      console.error(`[imagen3] generateSingleImage FAILED — model=imagen-3.0-generate-002 path=${path.basename(outPath)}`);
+      console.error(`[imagen3] error.message: ${msg}`);
+      if (detail !== msg) console.error(`[imagen3] error.detail: ${detail.slice(0, 1000)}`);
       return null;
     }
   }

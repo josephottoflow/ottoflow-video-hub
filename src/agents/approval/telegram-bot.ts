@@ -178,11 +178,12 @@ export class TelegramApprovalBot {
     const decision   = await this.pollForDecision(cbSlug, buttonMsgId);
     const waitTimeMs = Date.now() - startTime;
 
+    // Use Markdown V1 format (no \\! escapes) — sendText() sends parse_mode:"Markdown"
     const statusMsg = decision === "approved"
-      ? `✅ *${this.escapeMarkdown(topic)}* approved\\! Saving to library\\.`
+      ? `✅ *${topic}* approved! Saving to library.`
       : decision === "rejected"
-      ? `❌ *${this.escapeMarkdown(topic)}* rejected\\.`
-      : `⏰ *${this.escapeMarkdown(topic)}* timed out \\(${Math.round(this.timeoutMs / 60000)}min\\)\\.`;
+      ? `❌ *${topic}* rejected.`
+      : `⏰ *${topic}* timed out (${Math.round(this.timeoutMs / 60000)}min) — auto-approved.`;
 
     await this.sendText(statusMsg);
 

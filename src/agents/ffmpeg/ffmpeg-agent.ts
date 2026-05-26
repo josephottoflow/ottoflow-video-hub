@@ -59,10 +59,11 @@ const GRADE: Record<ThemePreset, string> = {
 // ─── Platform encoding presets ────────────────────────────────
 
 const PLATFORM_PRESET = {
-  tiktok:    { crf: 23, preset: "fast"   },
-  youtube:   { crf: 22, preset: "medium" },
-  instagram: { crf: 24, preset: "fast"   },
-  default:   { crf: 28, preset: "fast"   },
+  tiktok:    { crf: 23, preset: "fast"      },
+  youtube:   { crf: 22, preset: "medium"    },
+  instagram: { crf: 24, preset: "fast"      },
+  // ultrafast + single thread: ~60% less encoder RAM — acceptable quality for Railway free tier
+  default:   { crf: 28, preset: "ultrafast" },
 } as const;
 
 // EBU R128 target for social media platforms
@@ -170,7 +171,7 @@ export class FFmpegAgent {
       ].join(";");
 
       cmd = [
-        `${ffmpeg} -y`,
+        `${ffmpeg} -y -threads 1`,
         `-i "${inputPath}"`,
         `-i "${options.voiceoverPath}"`,
         `-stream_loop -1 -i "${options.musicPath}"`,
@@ -179,7 +180,7 @@ export class FFmpegAgent {
         "-map 0:v",
         `-map "${outLabel}"`,
         "-c:v libx264", `-crf ${crf}`, `-preset ${preset}`,
-        "-c:a aac -b:a 192k",
+        "-c:a aac -b:a 128k",
         `-t ${duration.toFixed(3)}`,
         "-r 30", "-movflags +faststart", "-pix_fmt yuv420p",
         `"${outputPath}"`,
@@ -197,7 +198,7 @@ export class FFmpegAgent {
       ].join(";");
 
       cmd = [
-        `${ffmpeg} -y`,
+        `${ffmpeg} -y -threads 1`,
         `-i "${inputPath}"`,
         `-i "${options.voiceoverPath}"`,
         `-vf "${vf}"`,
@@ -205,7 +206,7 @@ export class FFmpegAgent {
         "-map 0:v",
         `-map "${outLabel}"`,
         "-c:v libx264", `-crf ${crf}`, `-preset ${preset}`,
-        "-c:a aac -b:a 192k",
+        "-c:a aac -b:a 128k",
         `-t ${duration.toFixed(3)}`,
         "-r 30", "-movflags +faststart", "-pix_fmt yuv420p",
         `"${outputPath}"`,
@@ -224,14 +225,14 @@ export class FFmpegAgent {
       ].join(",");
 
       cmd = [
-        `${ffmpeg} -y`,
+        `${ffmpeg} -y -threads 1`,
         `-i "${inputPath}"`,
         `-stream_loop -1 -i "${options.musicPath}"`,
         `-vf "${vf}"`,
         `-filter:a "${afFilters}"`,
         "-map 0:v", "-map 1:a",
         "-c:v libx264", `-crf ${crf}`, `-preset ${preset}`,
-        "-c:a aac -b:a 192k",
+        "-c:a aac -b:a 128k",
         "-r 30", "-shortest", "-movflags +faststart", "-pix_fmt yuv420p",
         `"${outputPath}"`,
       ].join(" ");
@@ -247,19 +248,19 @@ export class FFmpegAgent {
       ].join(",");
 
       cmd = [
-        `${ffmpeg} -y`,
+        `${ffmpeg} -y -threads 1`,
         `-i "${inputPath}"`,
         `-vf "${vf}"`,
         `-af "${afFilters}"`,
         "-c:v libx264", `-crf ${crf}`, `-preset ${preset}`,
-        "-c:a aac -b:a 192k",
+        "-c:a aac -b:a 128k",
         "-r 30", "-movflags +faststart", "-pix_fmt yuv420p",
         `"${outputPath}"`,
       ].join(" ");
     } else {
       // No audio at all (silent Remotion render) — video-only output
       cmd = [
-        `${ffmpeg} -y`,
+        `${ffmpeg} -y -threads 1`,
         `-i "${inputPath}"`,
         `-vf "${vf}"`,
         "-an",
