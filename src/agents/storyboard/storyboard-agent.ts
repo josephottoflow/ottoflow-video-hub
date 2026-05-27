@@ -86,6 +86,56 @@ const HOOK_GUIDE: Record<string, string> = {
   "story":          "POV cold open — drop into a specific moment: 'It was 2am and I was staring at my laptop...' — viewer is dropped into the scene with sensory detail and real tension.",
 };
 
+/**
+ * Sheet-driven cinematic context — all fields optional.
+ * When provided, these values are locked into the Gemini prompt as constraints
+ * rather than letting Gemini invent them. Sheet = orchestration brain.
+ */
+export interface CinematicContext {
+  // Creator Identity
+  creatorPersona?:     string;
+  creatorEnergy?:      string;
+  creatorArchetype?:   string;
+  cameraStyle?:        string;
+  speakingStyle?:      string;
+  environmentStyle?:   string;
+
+  // Visual Cinematic
+  visualIdentity?:     string;
+  lightingStyle?:      string;
+  motionStyle?:        string;
+  pacingProfile?:      string;
+  colorMood?:          string;
+  shotLanguage?:       string;
+
+  // Content DNA
+  emotionalTrigger?:   string;
+  ctaStyle?:           string;
+  coreAngle?:          string;
+  storyArc?:           string;
+
+  // Storyboard scene overrides (Gemini refines/expands these — does not replace)
+  sceneCount?:           number;
+  hookScenePrompt?:      string;
+  revealScenePrompt?:    string;
+  insightScenePrompt?:   string;
+  proofScenePrompt?:     string;
+  ctaScenePrompt?:       string;
+
+  // Veo generation directives
+  veoPromptStrategy?:    string;
+  motionIntensity?:      string;
+  cameraMotion?:         string;
+  realismLevel?:         string;
+  ugcStyle?:             string;
+
+  // Voice + Caption
+  narrationStyle?:       string;
+  speechCadence?:        string;
+  emphasisStyle?:        string;
+  captionStyle?:         string;
+}
+
 export class StoryboardAgent {
   private ai: GoogleGenAI | null;
 
@@ -103,7 +153,8 @@ export class StoryboardAgent {
     style:          string,
     renderVariant:  string = "problem-first",
     hookStyle:      string = "shock",
-    existingScript?: string
+    existingScript?: string,
+    ctx?:           CinematicContext
   ): Promise<Storyboard> {
     if (!this.ai) {
       console.warn("[storyboard] No GOOGLE_API_KEY — using fallback storyboard");
@@ -115,6 +166,95 @@ export class StoryboardAgent {
 
     const seedNote = existingScript?.trim()
       ? `\nSEED SCRIPT (use this as inspiration — preserve the angle and facts, improve the pacing):\n"${existingScript.trim()}"\n`
+      : "";
+
+    // Build sheet-locked context blocks — when set, Gemini must inherit not invent
+    const hasIdentityLock = !!(ctx?.creatorPersona || ctx?.creatorEnergy || ctx?.creatorArchetype || ctx?.cameraStyle || ctx?.environmentStyle);
+    const hasVisualLock   = !!(ctx?.visualIdentity || ctx?.lightingStyle || ctx?.motionStyle || ctx?.colorMood);
+    const hasSceneSeeds   = !!(ctx?.hookScenePrompt || ctx?.revealScenePrompt || ctx?.insightScenePrompt || ctx?.proofScenePrompt || ctx?.ctaScenePrompt);
+
+    const identityBlock = hasIdentityLock
+      ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SHEET-LOCKED CREATOR IDENTITY — inherit exactly, do not change:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${ctx?.creatorPersona    ? `Creator Persona:   ${ctx.creatorPersona}`    : ""}
+${ctx?.creatorEnergy     ? `Creator Energy:    ${ctx.creatorEnergy}`     : ""}
+${ctx?.creatorArchetype  ? `Creator Archetype: ${ctx.creatorArchetype}`  : ""}
+${ctx?.cameraStyle       ? `Camera Style:      ${ctx.cameraStyle}`       : ""}
+${ctx?.environmentStyle  ? `Environment:       ${ctx.environmentStyle}`  : ""}
+${ctx?.speakingStyle     ? `Speaking Style:    ${ctx.speakingStyle}`     : ""}
+${ctx?.emotionalTrigger  ? `Emotional Trigger: ${ctx.emotionalTrigger}`  : ""}
+All scenes MUST feature the SAME creator in the SAME environment.`
+      : `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 0 — LOCK THE CREATOR PERSONA (before any scene)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Lock these BEFORE writing any scene. All scenes inherit them.
+
+1. Creator archetype — one specific human: (e.g. "25yo productivity obsessive at cluttered home desk", "burned-out corporate worker who escaped", "self-taught entrepreneur in city apartment")
+2. Platform energy — their emotional register: (e.g. "confessional and raw", "frustrated truth-teller", "genuinely excited about a discovery", "conspiratorial friend sharing something private")
+3. Signature environment — ONE real location that persists: (e.g. "cluttered home desk with sticky notes and cold coffee", "parked car in light rain", "kitchen table at 6am", "bedroom floor against bed frame")
+4. Signature lighting — ONE real-world light source: (e.g. "laptop screen glow in dark room", "east window morning light", "golden hour through apartment window", "warm floor lamp behind creator")
+5. Axis lock — pick a facing direction in s1 and NEVER flip it. 180° rule enforced across ALL scenes.`;
+
+    const visualBlock = hasVisualLock
+      ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SHEET-LOCKED VISUAL IDENTITY — do not change these values:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${ctx?.visualIdentity ? `Visual Style:  ${ctx.visualIdentity}` : ""}
+${ctx?.lightingStyle  ? `Lighting:      ${ctx.lightingStyle}`  : ""}
+${ctx?.motionStyle    ? `Motion:        ${ctx.motionStyle}`    : ""}
+${ctx?.colorMood      ? `Color Mood:    ${ctx.colorMood}`      : ""}
+${ctx?.shotLanguage   ? `Shot Language: ${ctx.shotLanguage}`   : ""}
+${ctx?.pacingProfile  ? `Pacing:        ${ctx.pacingProfile}`  : ""}
+Use these as the locked visual theme across ALL scenes. Write visualTheme JSON from these values.`
+      : `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — LOCK VISUAL IDENTITY (before any scene)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Pick ONE visual style preset and lock ALL values for every scene:
+
+${Object.entries(ARCH.visual_style_presets as Record<string, { environment: string; energy: string; lighting: string; film_look: string }>)
+  .map(([key, v]) => `- "${key}": ${v.environment} | ${v.energy} | ${v.lighting}`)
+  .join("\n")}
+
+Lock:
+- palette: 3-4 specific environment colors (hex or named)
+- lighting: the ONE real light source (practical/natural only — no "dramatic lighting", no "rim light setup")
+- lens: smartphone portrait feel — shallow DOF, natural vignette, imperfect corners
+- filmLook: muted saturation, slight grain, warm or cool temp — never "cinematic grade" as a vague catch-all
+- motion: camera personality that matches filming context (self-filmed drift, documentary follow, locked with lens breathing)`;
+
+    const sceneSeedBlock = hasSceneSeeds
+      ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SHEET-SEEDED SCENE PROMPTS — expand and refine these (do not replace):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The sheet author has defined scene-level visual direction. Take each as a starting seed:
+add camera motion, micro-actions, specific objects, and light source detail to meet the 10-point spec.
+${ctx?.hookScenePrompt    ? `Hook Scene Seed:    "${ctx.hookScenePrompt}"`    : ""}
+${ctx?.revealScenePrompt  ? `Reveal Scene Seed:  "${ctx.revealScenePrompt}"`  : ""}
+${ctx?.insightScenePrompt ? `Insight Scene Seed: "${ctx.insightScenePrompt}"` : ""}
+${ctx?.proofScenePrompt   ? `Proof Scene Seed:   "${ctx.proofScenePrompt}"`   : ""}
+${ctx?.ctaScenePrompt     ? `CTA Scene Seed:     "${ctx.ctaScenePrompt}"`     : ""}
+`
+      : "";
+
+    const veoDirectivesBlock = (ctx?.veoPromptStrategy || ctx?.motionIntensity || ctx?.cameraMotion || ctx?.realismLevel || ctx?.ugcStyle)
+      ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SHEET-LOCKED VEO DIRECTIVES — apply to every visualPrompt:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${ctx?.veoPromptStrategy ? `Prompt Strategy: ${ctx.veoPromptStrategy}` : ""}
+${ctx?.motionIntensity   ? `Motion Intensity: ${ctx.motionIntensity}`   : ""}
+${ctx?.cameraMotion      ? `Camera Motion: ${ctx.cameraMotion}`         : ""}
+${ctx?.realismLevel      ? `Realism Level: ${ctx.realismLevel}`         : ""}
+${ctx?.ugcStyle          ? `UGC Style: ${ctx.ugcStyle}`                 : ""}
+`
+      : "";
+
+    const sceneCountNote = ctx?.sceneCount
+      ? `\nSCENE COUNT: Generate exactly ${ctx.sceneCount} scenes following the narrative arc.`
+      : "";
+
+    const captionNote = ctx?.captionStyle && ctx.captionStyle !== "auto"
+      ? `\nCAPTION STYLE OVERRIDE: Use "${ctx.captionStyle}" for all scenes unless the beat requires a different style.`
       : "";
 
     // Pull example prompts and quality rules from architecture spec
@@ -133,34 +273,14 @@ Every scene must feel like a real creator filmed it on their phone. Authentic, i
 TOPIC: "${topic}"
 CONTENT STYLE: "${style}"
 NARRATIVE VARIANT: ${renderVariant}
-HOOK STYLE: ${hookStyle} — ${hookGuide}${seedNote}
+HOOK STYLE: ${hookStyle} — ${hookGuide}${sceneCountNote}${seedNote}
+${ctx?.emotionalTrigger ? `EMOTIONAL TRIGGER: ${ctx.emotionalTrigger}` : ""}
+${ctx?.ctaStyle         ? `CTA STYLE: ${ctx.ctaStyle}`                 : ""}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 0 — LOCK THE CREATOR PERSONA (before any scene)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Lock these BEFORE writing any scene. All scenes inherit them.
+${identityBlock}
 
-1. Creator archetype — one specific human: (e.g. "25yo productivity obsessive at cluttered home desk", "burned-out corporate worker who escaped", "self-taught entrepreneur in city apartment")
-2. Platform energy — their emotional register: (e.g. "confessional and raw", "frustrated truth-teller", "genuinely excited about a discovery", "conspiratorial friend sharing something private")
-3. Signature environment — ONE real location that persists: (e.g. "cluttered home desk with sticky notes and cold coffee", "parked car in light rain", "kitchen table at 6am", "bedroom floor against bed frame")
-4. Signature lighting — ONE real-world light source: (e.g. "laptop screen glow in dark room", "east window morning light", "golden hour through apartment window", "warm floor lamp behind creator")
-5. Axis lock — pick a facing direction in s1 and NEVER flip it. 180° rule enforced across ALL scenes.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 1 — LOCK VISUAL IDENTITY (before any scene)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Pick ONE visual style preset and lock ALL values for every scene:
-
-${Object.entries(ARCH.visual_style_presets as Record<string, { environment: string; energy: string; lighting: string; film_look: string }>)
-  .map(([key, v]) => `- "${key}": ${v.environment} | ${v.energy} | ${v.lighting}`)
-  .join("\n")}
-
-Lock:
-- palette: 3-4 specific environment colors (hex or named)
-- lighting: the ONE real light source (practical/natural only — no "dramatic lighting", no "rim light setup")
-- lens: smartphone portrait feel — shallow DOF, natural vignette, imperfect corners
-- filmLook: muted saturation, slight grain, warm or cool temp — never "cinematic grade" as a vague catch-all
-- motion: camera personality that matches filming context (self-filmed drift, documentary follow, locked with lens breathing)
+${visualBlock}
+${veoDirectivesBlock}${sceneSeedBlock}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 NARRATIVE ARC — follow this exactly:

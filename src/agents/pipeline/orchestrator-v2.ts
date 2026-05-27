@@ -23,7 +23,7 @@ import { SeoGenerator }        from "../seo/seo-generator";
 import { ScriptWriterAgent, sanitizeScript } from "../scriptwriter/scriptwriter-agent";
 import type { HookStyle, RenderVariant } from "../scriptwriter/scriptwriter-agent";
 import { StoryboardAgent }     from "../storyboard/storyboard-agent";
-import type { Storyboard }    from "../storyboard/storyboard-agent";
+import type { Storyboard, CinematicContext } from "../storyboard/storyboard-agent";
 import { FFmpegAgent }         from "../ffmpeg/ffmpeg-agent";
 import { MusicAgent }          from "../music/music-agent";
 import { VoiceoverAgent }      from "../voiceover/voiceover-agent";
@@ -81,27 +81,81 @@ export class PipelineOrchestratorV2 {
     const row = all.find((r) => r.rowIndex === rowIndex);
     if (!row) throw new Error(`V2 Row ${rowIndex} not found in ${SHEET_NAME}`);
 
+    // Sheet-driven overrides: row fields take precedence over job queue params
+    // coreAngle / storyArc → renderVariant, hookStrategy → hookStyle
+    const effectiveVariant: RenderVariant = (renderVariant
+      ?? (row.coreAngle  as RenderVariant)
+      ?? (row.storyArc   as RenderVariant)
+      ?? "problem-first") as RenderVariant;
+
+    const effectiveHookStyle: HookStyle = (hookStyle
+      ?? (row.hookStrategy as HookStyle)
+      ?? "shock") as HookStyle;
+
+    // Build CinematicContext from all sheet fields — Gemini uses these as locked constraints
+    const ctx: CinematicContext = {
+      creatorPersona:     row.creatorPersona     || undefined,
+      creatorEnergy:      row.creatorEnergy      || undefined,
+      creatorArchetype:   row.creatorArchetype   || undefined,
+      cameraStyle:        row.cameraStyle        || undefined,
+      speakingStyle:      row.speakingStyle      || undefined,
+      environmentStyle:   row.environmentStyle   || undefined,
+      visualIdentity:     row.visualIdentity     || undefined,
+      lightingStyle:      row.lightingStyle      || undefined,
+      motionStyle:        row.motionStyle        || undefined,
+      pacingProfile:      row.pacingProfile      || undefined,
+      colorMood:          row.colorMood          || undefined,
+      shotLanguage:       row.shotLanguage       || undefined,
+      emotionalTrigger:   row.emotionalTrigger   || undefined,
+      ctaStyle:           row.ctaStyle           || undefined,
+      coreAngle:          row.coreAngle          || undefined,
+      storyArc:           row.storyArc           || undefined,
+      sceneCount:         row.sceneCount,
+      hookScenePrompt:    row.hookScenePrompt,
+      revealScenePrompt:  row.revealScenePrompt,
+      insightScenePrompt: row.insightScenePrompt,
+      proofScenePrompt:   row.proofScenePrompt,
+      ctaScenePrompt:     row.ctaScenePrompt,
+      veoPromptStrategy:  row.veoPromptStrategy  || undefined,
+      motionIntensity:    row.motionIntensity     || undefined,
+      cameraMotion:       row.cameraMotion        || undefined,
+      realismLevel:       row.realismLevel        || undefined,
+      ugcStyle:           row.ugcStyle            || undefined,
+      narrationStyle:     row.narrationStyle      || undefined,
+      speechCadence:      row.speechCadence       || undefined,
+      emphasisStyle:      row.emphasisStyle        || undefined,
+      captionStyle:       row.captionStyle         || undefined,
+    };
+
+    // V2 voice: sheet voiceProfile → legacy voice field → "bright friendly" default
+    const v2Voice = row.voiceProfile?.trim() || row.voice?.trim() || "bright friendly";
+
     // Fill script if missing — try ScriptWriter with variant, fall back to template
     if (!row.script || row.script.trim().length < 10) {
+      await this.sheets.updateStageStatus(rowIndex, "script", "Generating");
       try {
         const gen = await this.scriptWriter.generateScript(
           row.topic, row.style,
           { a: row.hookA, b: row.hookB, c: row.hookC },
-          hookStyle ?? "question",
-          renderVariant
+          effectiveHookStyle,
+          effectiveVariant
         );
         row.script = gen.script;
         row.hookA  = row.hookA || gen.hookA;
         row.hookB  = row.hookB || gen.hookB;
         row.hookC  = row.hookC || gen.hookC;
         await this.sheets.updateScript(rowIndex, row.script, row.hookA, row.hookB, row.hookC);
-        console.log(`[v2] Script generated — variant: ${renderVariant ?? "default"}, hook: ${hookStyle ?? "question"}`);
+        await this.sheets.updateStageStatus(rowIndex, "script", "Done");
+        console.log(`[v2] Script generated — variant: ${effectiveVariant}, hook: ${effectiveHookStyle}`);
       } catch (err) {
         if (!row.script || row.script.trim().length < 10) {
           row.script = templateScript(row.topic);
           console.log("[v2] Using template script (ScriptWriter unavailable)");
         }
+        await this.sheets.updateStageStatus(rowIndex, "script", "Error");
       }
+    } else {
+      await this.sheets.updateStageStatus(rowIndex, "script", "Done");
     }
 
     row.script = sanitizeScript(row.script);
@@ -123,19 +177,30 @@ export class PipelineOrchestratorV2 {
     let pipelineResult: PipelineResult;
     try {
       await this.sheets.updateStatus(rowIndex, "Processing");
+      if (dbJobId) await this.sheets.updateWorkerJobId(rowIndex, dbJobId);
       setStatus("running", row.topic, 5);
 
       // ── Step 1: Generate dynamic storyboard (Gemini creative director) ──────
       let _t = Date.now();
-      emitLog("V2-Orchestrator", `Building storyboard (variant: ${renderVariant ?? "problem-first"}, hook: ${hookStyle ?? "shock"}) | tempDir=${tempDir} | staticPort=${process.env.PORT || "3000"} | Veo=${VeoAgent.isAvailable()} | ElevenLabs=${!!process.env.ELEVENLABS_API_KEY} | R2=${isR2Available()}`, "agent");
+      await this.sheets.updateStageStatus(rowIndex, "storyboard", "Generating");
+      const ctxSummary = [
+        ctx.creatorPersona   ? `persona="${ctx.creatorPersona.slice(0,30)}"` : null,
+        ctx.visualIdentity   ? `visual="${ctx.visualIdentity}"`              : null,
+        ctx.emotionalTrigger ? `trigger="${ctx.emotionalTrigger.slice(0,30)}"` : null,
+        ctx.sceneCount       ? `scenes=${ctx.sceneCount}`                    : null,
+      ].filter(Boolean).join(" ");
+      emitLog("V2-Orchestrator", `Building storyboard (variant: ${effectiveVariant}, hook: ${effectiveHookStyle}${ctxSummary ? ` | ${ctxSummary}` : ""}) | Veo=${VeoAgent.isAvailable()} | ElevenLabs=${!!process.env.ELEVENLABS_API_KEY} | R2=${isR2Available()}`, "agent");
       TRACE(`Providers: GOOGLE_API_KEY=${!!process.env.GOOGLE_API_KEY} ANTHROPIC=${!!process.env.ANTHROPIC_API_KEY} ELEVENLABS=${!!process.env.ELEVENLABS_API_KEY} JAMENDO=${!!process.env.JAMENDO_CLIENT_ID} R2=${isR2Available()} D_ID=${!!process.env.D_ID_API_KEY}`);
-      TRACE(`Sheet row: rowIndex=${rowIndex} topic="${row.topic}" style="${row.style}" voice="${row.voice}" scriptLen=${row.script?.length ?? 0}`);
+      TRACE(`Sheet row: rowIndex=${rowIndex} topic="${row.topic}" style="${row.style}" voice="${v2Voice}" scriptLen=${row.script?.length ?? 0}`);
+      TRACE(`CinematicContext: ${JSON.stringify(ctx).slice(0, 300)}`);
       const sb: Storyboard = await this.storyboard.generate(
         row.topic, row.style,
-        renderVariant ?? "problem-first",
-        hookStyle     ?? "shock",
-        row.script?.trim() || undefined   // seed Gemini with existing sheet script
+        effectiveVariant,
+        effectiveHookStyle,
+        row.script?.trim() || undefined,   // seed Gemini with existing sheet script
+        ctx                                // sheet-driven cinematic constraints
       );
+      await this.sheets.updateStageStatus(rowIndex, "storyboard", "Done");
       emitLog("V2-Orchestrator", `Storyboard done in ${Date.now()-_t}ms — ${sb.scenes.length} scenes, ${(sb.totalFrames / 30).toFixed(1)}s, style=${sb.visualStyle}`, "success");
       TRACE(`Storyboard scenes: ${sb.scenes.map(s => `${s.id}(${s.beat},${s.seconds}s)`).join(" | ")}`);
       TRACE(`Full script (${sb.fullScript.split(" ").length}w): "${sb.fullScript}"`);
@@ -163,21 +228,21 @@ export class PipelineOrchestratorV2 {
         .catch((err: unknown) => console.warn(`[v2] sheets.updateScript failed: ${err instanceof Error ? err.message : err}`));
 
       // ── Step 2: ElevenLabs voiceover from fullScript ──────────────────────
-
-      // V2 canonical voice: "bright friendly" (Gigi — creator-native TikTok cadence).
-      // Sheet col G overrides if set; otherwise default to bright friendly.
-      const v2Voice = row.voice?.trim() || "bright friendly";
+      // Voice resolution: sheet voiceProfile (M) → legacy voice (col in V1) → "bright friendly"
       emitLog("V2-Orchestrator", `Generating voiceover (voice: ${v2Voice})...`, "info");
-      TRACE(`Voiceover: ElevenLabs available=${!!process.env.ELEVENLABS_API_KEY} voice="${v2Voice}" (sheet="${row.voice ?? ""}") scriptWords=${sb.fullScript.split(" ").length}`);
+      TRACE(`Voiceover: ElevenLabs available=${!!process.env.ELEVENLABS_API_KEY} voice="${v2Voice}" scriptWords=${sb.fullScript.split(" ").length}`);
+      await this.sheets.updateStageStatus(rowIndex, "voice", "Generating");
       _t = Date.now();
       const voicePath = await this.voiceover.generate(sb.fullScript, tempDir, v2Voice) ?? undefined;
       if (voicePath) {
         const voiceSizeKb = Math.round(fs.statSync(voicePath).size / 1024);
         emitLog("V2-Orchestrator", "Voiceover ready", "success");
         TRACE(`Voiceover done in ${Date.now()-_t}ms — ${voiceSizeKb}KB at ${voicePath}`);
+        await this.sheets.updateStageStatus(rowIndex, "voice", "Done");
       } else {
         emitLog("V2-Orchestrator", "⚠️ Voiceover skipped — check ELEVENLABS_API_KEY. Video will be silent.", "warning");
         TRACE(`Voiceover skipped in ${Date.now()-_t}ms — no file produced`);
+        await this.sheets.updateStageStatus(rowIndex, "voice", "Skipped");
       }
       setStatus("running", row.topic, 28);
 
@@ -186,7 +251,8 @@ export class PipelineOrchestratorV2 {
       const imageUrlMap: Record<string, string> = {};
 
       if (VeoAgent.isAvailable()) {
-        this.veo.resetQuota(); // fresh attempt — clears any quota flag from a prior job on this instance
+        this.veo.resetQuota();
+        await this.sheets.updateStageStatus(rowIndex, "veo", "Generating");
         emitLog("V2-Orchestrator", `Generating ${sb.scenes.length} Veo clips (serialized — avoids burst 429)...`, "info");
         TRACE(`Veo: model=veo-3.1-lite-generate-preview scenes=${sb.scenes.length} GOOGLE_API_KEY=${process.env.GOOGLE_API_KEY ? process.env.GOOGLE_API_KEY.slice(0,8)+"..." : "MISSING"}`);
         _t = Date.now();
@@ -229,9 +295,12 @@ export class PipelineOrchestratorV2 {
           // 5s gap between Veo requests — keeps burst rate under 4 QPM ceiling
           if (i < sb.scenes.length - 1) await new Promise(r => setTimeout(r, 5_000));
         }
-        console.log(`[v2] Veo batch done in ${Date.now()-_t}ms — ${Object.keys(clipUrlMap).length}/${sb.scenes.length} clips stored in R2. Missing: ${sb.scenes.filter(s=>!clipUrlMap[s.id]).map(s=>s.id).join(",")||"none"}`);
+        const veoStored = Object.keys(clipUrlMap).length;
+        console.log(`[v2] Veo batch done in ${Date.now()-_t}ms — ${veoStored}/${sb.scenes.length} clips stored in R2. Missing: ${sb.scenes.filter(s=>!clipUrlMap[s.id]).map(s=>s.id).join(",")||"none"}`);
+        await this.sheets.updateStageStatus(rowIndex, "veo", veoStored > 0 ? "Done" : "Error");
       } else {
         console.log(`[v2] Veo SKIPPED — GOOGLE_API_KEY not set. All scenes will use Imagen3 fallback.`);
+        await this.sheets.updateStageStatus(rowIndex, "veo", "Skipped");
       }
 
       // ── Step 4: Imagen3 static fallback for scenes missing a clip ─────────
@@ -383,6 +452,7 @@ export class PipelineOrchestratorV2 {
 
       emitLog("V2-Orchestrator", "Rendering V2 composition...", "info");
       await this.sheets.updateStatus(rowIndex, "Rendering");
+      await this.sheets.updateStageStatus(rowIndex, "render", "Rendering");
       setStatus("running", row.topic, 65);
 
       _t = Date.now();
@@ -404,6 +474,7 @@ export class PipelineOrchestratorV2 {
         TRACE_ERR(`Render FAILED: ${renderResult.error}`);
         throw new Error(renderResult.error || "Render failed");
       }
+      await this.sheets.updateStageStatus(rowIndex, "render", "Done");
       emitLog("V2-Orchestrator", `Rendered in ${Date.now()-_t}ms — ${((renderResult.fileSizeBytes || 0) / 1024 / 1024).toFixed(1)}MB path=${renderResult.videoPath}`, "success");
       TRACE(`Render output: ${renderResult.videoPath} exists=${fs.existsSync(renderResult.videoPath)} size=${((renderResult.fileSizeBytes||0)/1024/1024).toFixed(1)}MB`);
       _t = Date.now();
@@ -477,9 +548,8 @@ export class PipelineOrchestratorV2 {
       TRACE(`Telegram approval decision: ${approval.decision} waitMs=${approval.waitTimeMs}`);
 
       if (approval.decision === "approved" || approval.decision === "timeout") {
-        // Auto-approve on timeout — video is already rendered and good to go.
-        // Creator can review in Quality Review tab; rejecting requires a separate re-queue.
         await this.sheets.markComplete(rowIndex, outputLink);
+        await this.sheets.updateStageStatus(rowIndex, "approval", "Done");
         setStatus("done", row.topic, 100);
         if (approval.decision === "timeout") {
           emitLog("V2-Orchestrator", `Telegram timeout — auto-approved: ${row.topic}`, "success");
@@ -488,6 +558,7 @@ export class PipelineOrchestratorV2 {
         }
       } else if (approval.decision === "rejected") {
         await this.sheets.updateStatus(rowIndex, "Rejected");
+        await this.sheets.updateStageStatus(rowIndex, "approval", "Error");
         setStatus("error");
         emitLog("V2-Orchestrator", `Rejected: ${row.topic}`, "warning");
       }
