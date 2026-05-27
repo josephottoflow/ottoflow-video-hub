@@ -166,10 +166,13 @@ export class PipelineOrchestratorV2 {
       const publicContent = path.resolve("public", "content", slug);
       fs.mkdirSync(publicContent, { recursive: true });
 
-      emitLog("V2-Orchestrator", "Generating voiceover...", "info");
-      TRACE(`Voiceover: ElevenLabs available=${!!process.env.ELEVENLABS_API_KEY} voice="${row.voice}" scriptWords=${sb.fullScript.split(" ").length}`);
+      // V2 canonical voice: "bright friendly" (Gigi — creator-native TikTok cadence).
+      // Sheet col G overrides if set; otherwise default to bright friendly.
+      const v2Voice = row.voice?.trim() || "bright friendly";
+      emitLog("V2-Orchestrator", `Generating voiceover (voice: ${v2Voice})...`, "info");
+      TRACE(`Voiceover: ElevenLabs available=${!!process.env.ELEVENLABS_API_KEY} voice="${v2Voice}" (sheet="${row.voice ?? ""}") scriptWords=${sb.fullScript.split(" ").length}`);
       _t = Date.now();
-      const voicePath = await this.voiceover.generate(sb.fullScript, tempDir, row.voice) ?? undefined;
+      const voicePath = await this.voiceover.generate(sb.fullScript, tempDir, v2Voice) ?? undefined;
       if (voicePath) {
         const voiceSizeKb = Math.round(fs.statSync(voicePath).size / 1024);
         emitLog("V2-Orchestrator", "Voiceover ready", "success");
@@ -232,7 +235,7 @@ export class PipelineOrchestratorV2 {
       const missingScenes = sb.scenes.filter(s => !clipUrlMap[s.id]);
       if (missingScenes.length > 0) {
         emitLog("V2-Orchestrator", `Imagen3 fallback for ${missingScenes.length} scene(s)...`, "info");
-        TRACE(`Imagen3: falling back for scenes: ${missingScenes.map(s=>s.id).join(",")} — model=gemini-2.0-flash-preview-image-generation`);
+        TRACE(`Imagen3: falling back for scenes: ${missingScenes.map(s=>s.id).join(",")} — model=gemini-2.5-flash-image`);
         _t = Date.now();
         await Promise.all(missingScenes.map(async (scene) => {
           try {
@@ -318,6 +321,15 @@ export class PipelineOrchestratorV2 {
           imagePath:     imageUrlMap[scene.id] ?? "",
         })),
       };
+
+      // Railway-visible asset manifest — confirms each scene's asset source
+      console.log(`[v2] asset manifest for job ${slug}:`);
+      storyboardData.scenes.forEach((scene, i) => {
+        const clip = clipUrlMap[scene.id];
+        const img  = imageUrlMap[scene.id];
+        const src  = clip ? `VEO:${clip.slice(-40)}` : img ? `IMG:${img.slice(-40)}` : "PROCEDURAL (dark gradient)";
+        console.log(`  scene${i+1} [${scene.beat}] → ${src}`);
+      });
 
       const videoData: V2UGCData = {
         topic:      row.topic,

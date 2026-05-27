@@ -256,7 +256,7 @@ export class VeoAgent {
 
     let operation = await this.ai!.models.generateVideos({
       model:  VEO_MODEL,
-      prompt: `${prompt}. Slow cinematic camera movement, smooth motion, dramatic lighting, photorealistic, no text overlays.`,
+      prompt: `${prompt}. 9:16 vertical portrait, natural authentic motion, no text overlays, no UI elements.`,
       image: { imageBytes, mimeType: "image/jpeg" },
       config: {
         numberOfVideos:  1,
