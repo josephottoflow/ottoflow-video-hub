@@ -66,6 +66,7 @@ HUMAN VOICE RULES — non-negotiable:
 - Use rhetorical questions mid-script: "right?", "you know what I mean?", "sound familiar?" — these create a conversation, not a monologue.
 - Numbers beat adjectives: "3 years" not "several years", "$40k" not "a lot of money", "11pm" not "late at night".
 - Pause beats: use "..." deliberately — signals a breath, a realization, a moment the viewer needs to sit with.
+- CAPS for vocal emphasis on the ONE word that carries the most weight in a sentence. Use sparingly — one or two per script max. Wrong: "THE BEST THING EVER". Right: "Most people get this COMPLETELY wrong." or "I was spending TWELVE HOURS a day on this."
 - Drop into specifics suddenly — one unexpected concrete detail makes everything else believable.
 - Never explain the hook — just deliver it and move on. Trust the audience.
 - The CTA should feel like the creator genuinely wants them there, not marketing copy. "I post this stuff every week" beats "follow for more content".`;
@@ -169,7 +170,7 @@ ${HUMAN_VOICE_RULES}
 
 Write a complete content package. Output ONLY valid JSON:
 {
-  "script": "30-35 word voiceover script. Sounds like a real person talking. Follows the 3-beat arc. One idea only. Ends with a soft CTA. STRICT MAX 35 WORDS.",
+  "script": "30-35 word voiceover script. Sounds like a real person talking. Follows the 3-beat arc. One idea only. Ends with a soft CTA. Use '...' for pause beats. Use CAPS on one or two key words for emphasis. STRICT MAX 35 WORDS.",
   "hookA": "${hookStyle} style hook — max 8 words, no em-dashes",
   "hookB": "Surprising fact or number hook — max 8 words, no em-dashes",
   "hookC": "Direct you-language challenge — max 8 words, no em-dashes",

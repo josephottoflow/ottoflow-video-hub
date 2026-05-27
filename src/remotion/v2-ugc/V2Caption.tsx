@@ -32,14 +32,18 @@ export const V2Caption: React.FC<V2CaptionProps> = ({
     return (
       <div style={{ position: "absolute", top: "50%", left: 0, right: 0, transform: "translateY(-50%)", paddingLeft: 48, paddingRight: 48, display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "0 10px", opacity: globalOpacity }}>
         {words.map((word, i) => {
-          const delay   = i * 5;
-          const prog    = spring({ frame: frame - delay, fps, config: { damping: 14, stiffness: 220, mass: 0.7 } });
-          const isKey   = word.toLowerCase().replace(/[^a-z0-9%]/g, "") === keyWord.toLowerCase().replace(/[^a-z0-9%]/g, "");
+          const delay       = i * 5;
+          const prog        = spring({ frame: frame - delay, fps, config: { damping: 14, stiffness: 220, mass: 0.7 } });
+          const isKey       = word.toLowerCase().replace(/[^a-z0-9%]/g, "") === keyWord.toLowerCase().replace(/[^a-z0-9%]/g, "");
+          const springScale = interpolate(prog, [0, 1], [0.85, 1]);
+          // Continuous ±2.5% sine pulse on keyword — period ~45 frames (1.5s), fades in as spring settles
+          const keyPulse    = isKey ? 0.025 * Math.sin((frame / fps) * Math.PI * 1.33) * prog : 0;
+          const finalScale  = springScale + keyPulse;
           return (
             <span key={i} style={{
               display:       "inline-block",
               opacity:       interpolate(prog, [0, 1], [0, 1]),
-              transform:     `translateY(${interpolate(prog, [0, 1], [20, 0])}px) scale(${interpolate(prog, [0, 1], [0.85, 1])})`,
+              transform:     `translateY(${interpolate(prog, [0, 1], [20, 0])}px) scale(${finalScale})`,
               fontFamily:    "'Space Grotesk', sans-serif",
               fontSize:      isKey ? 92 : 78,
               fontWeight:    900,
