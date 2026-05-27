@@ -24,17 +24,20 @@ function randomVariant(): RenderVariant { return ALL_VARIANTS[Math.floor(Math.ra
 function randomHookStyle(): string      { return ALL_HOOK_STYLES[Math.floor(Math.random() * ALL_HOOK_STYLES.length)]; }
 
 export async function POST(req: NextRequest) {
-  const body             = await req.json().catch(() => ({})) as { rowIndex?: number; template?: string; musicVibe?: string };
+  const body             = await req.json().catch(() => ({})) as { rowIndex?: number; template?: string; musicVibe?: string; version?: string; sheetName?: string };
   const singleRowIndex   = typeof body.rowIndex  === "number" ? body.rowIndex  : undefined;
   const templateOverride = typeof body.template  === "string" ? body.template  : undefined;
   const musicVibe        = typeof body.musicVibe === "string" ? body.musicVibe : undefined;
+  const version          = body.version === "v2" ? "v2" : "v1";
+  const sheetName        = typeof body.sheetName === "string" ? body.sheetName : undefined;
 
   try {
     clearLogs();
     setStatus("running", "", 0);
     emitLog("Orchestrator", singleRowIndex !== undefined ? `Queuing row ${singleRowIndex}` : "Queuing all pending", "info");
 
-    const sheets = new SheetsClient();
+    const v2Sheet = version === "v2" ? (sheetName ?? "Video Gen — Advance Tier") : undefined;
+    const sheets  = v2Sheet ? new SheetsClient(v2Sheet, "v2-advanced") : new SheetsClient();
     await sheets.initializeSheet();
 
     if (singleRowIndex !== undefined) {
@@ -55,8 +58,8 @@ export async function POST(req: NextRequest) {
         hook_a: row.hookA, hook_b: row.hookB, hook_c: row.hookC, script: row.script,
       });
 
-      const job = await createJob(row.rowIndex, row.topic, template, { version: "v1", renderVariant, hookStyle, musicVibe });
-      await enqueueRender({ rowIndex: row.rowIndex, template, topic: row.topic, dbJobId: job.id, renderVariant, hookStyle, musicVibe });
+      const job = await createJob(row.rowIndex, row.topic, template, { version, renderVariant, hookStyle, musicVibe });
+      await enqueueRender({ rowIndex: row.rowIndex, template, topic: row.topic, dbJobId: job.id, renderVariant, hookStyle, musicVibe, version, sheetName: v2Sheet });
       await sheets.updateStatus(row.rowIndex, "Queued");
 
       setStatus("running", row.topic, 10);
@@ -86,8 +89,8 @@ export async function POST(req: NextRequest) {
           hook_a: row.hookA, hook_b: row.hookB, hook_c: row.hookC, script: row.script,
         });
 
-        const job = await createJob(row.rowIndex, row.topic, template, { version: "v1", renderVariant, hookStyle, musicVibe });
-        await enqueueRender({ rowIndex: row.rowIndex, template, topic: row.topic, dbJobId: job.id, renderVariant, hookStyle, musicVibe });
+        const job = await createJob(row.rowIndex, row.topic, template, { version, renderVariant, hookStyle, musicVibe });
+        await enqueueRender({ rowIndex: row.rowIndex, template, topic: row.topic, dbJobId: job.id, renderVariant, hookStyle, musicVibe, version, sheetName: v2Sheet });
         await sheets.updateStatus(row.rowIndex, "Queued");
         jobs.push({ id: job.id, topic: row.topic, template, renderVariant });
         emitLog("Orchestrator", `Queued: ${row.topic} (${template} / ${renderVariant})`, "info");

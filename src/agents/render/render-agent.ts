@@ -101,7 +101,6 @@ export class RenderAgent {
         id:          compositionId,
         inputProps:  { data: videoData },
         timeoutInMilliseconds: 30_000,
-        // Software GL for containerised Linux (no GPU on Railway/cloud)
         chromiumOptions: process.platform === "linux" ? { gl: "swangle" } : undefined,
       });
 
@@ -128,7 +127,6 @@ export class RenderAgent {
         // Disable parallel encoding pipeline (saves ~50-100 MB peak)
         disallowParallelEncoding: true,
         timeoutInMilliseconds: 120_000,
-        // Software GL for containerised Linux (no GPU on Railway/cloud)
         chromiumOptions: process.platform === "linux" ? { gl: "swangle" } : undefined,
         // Force x264 to 1 thread — default 60-thread lookahead at 1080×1920 was the
         // primary OOM source (60 threads × 40-frame lookahead × 6 MB/frame = GBs).
