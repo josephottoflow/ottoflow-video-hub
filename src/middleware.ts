@@ -1,8 +1,15 @@
-export { default } from "next-auth/middleware";
+import { withAuth } from "next-auth/middleware";
+
+export default withAuth({
+  callbacks: {
+    authorized({ req, token }) {
+      // API routes are unprotected — internal tool
+      if (req.nextUrl.pathname.startsWith("/api/")) return true;
+      return !!token;
+    },
+  },
+});
 
 export const config = {
-  // Only protect the UI pages — all /api routes are unprotected (internal tool)
-  matcher: [
-    "/((?!api|login|_next/static|_next/image|favicon\\.ico).*)",
-  ],
+  matcher: ["/((?!_next/static|_next/image|favicon\\.ico).*)"],
 };
