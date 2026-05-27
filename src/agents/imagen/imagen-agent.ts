@@ -116,17 +116,36 @@ export class Imagen3Agent {
     const response = await this.ai!.models.generateContent({
       model:    "gemini-2.5-flash-image",
       contents: this.enhancePrompt(prompt),
-      config:   { responseModalities: ["IMAGE"] },
+      // Both IMAGE+TEXT needed: image-gen models return interleaved content
+      config:   { responseModalities: ["IMAGE", "TEXT"] },
     });
 
     const parts = response.candidates?.[0]?.content?.parts ?? [];
-    const imagePart = parts.find((p: any) => p.inlineData?.mimeType?.startsWith("image/"));
-    if (!imagePart?.inlineData?.data) {
-      const respSummary = JSON.stringify(response).slice(0, 500);
-      console.error(`[imagen3] no image part in response: ${respSummary}`);
-      throw new Error("Gemini image generation returned no image data");
+
+    // Check inlineData (base64 embedded) and fileData (URI reference) formats
+    const imagePart = parts.find(
+      (p: any) => p.inlineData?.mimeType?.startsWith("image/") || p.fileData?.mimeType?.startsWith("image/")
+    );
+
+    if (!imagePart) {
+      const finishReason = response.candidates?.[0]?.finishReason ?? "unknown";
+      const partSummary  = JSON.stringify(parts).slice(0, 300);
+      console.error(`[imagen3] no image part — finishReason=${finishReason} parts=${partSummary}`);
+      throw new Error(`Gemini image generation returned no image data (finishReason=${finishReason})`);
     }
-    return Buffer.from(imagePart.inlineData.data, "base64");
+
+    if (imagePart.inlineData?.data) {
+      return Buffer.from(imagePart.inlineData.data, "base64");
+    }
+
+    // fileData path — fetch the URI
+    const uri = imagePart.fileData?.fileUri;
+    if (uri) {
+      const res = await fetch(uri);
+      return Buffer.from(await res.arrayBuffer());
+    }
+
+    throw new Error("Gemini image generation: imagePart has no usable data");
   }
 
   private enhancePrompt(prompt: string): string {
