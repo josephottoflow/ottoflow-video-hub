@@ -4,10 +4,12 @@
  * Uses GOOGLE_API_KEY (already in .env) — no new signup needed.
  * Generates one 9:16 portrait image per scene, saves to temp/{slug}/
  *
- * Model: gemini-2.0-flash-preview-image-generation
- * (Imagen 3 via models.generateImages() requires Vertex AI service-account auth,
- *  which is incompatible with a plain API key. Gemini Flash image generation works
- *  via the standard AI Studio key and produces equivalent quality.)
+ * Model: gemini-2.0-flash-exp (v1alpha API)
+ *
+ * Critical: gemini-2.0-flash-exp only exists in API version v1alpha, NOT v1beta.
+ * The default GoogleGenAI client uses v1beta → 404. A separate client with
+ * apiVersion:"v1alpha" is required for image generation.
+ * Imagen 3 (models.generateImages) requires Vertex AI service-account auth → unusable.
  */
 
 import { GoogleGenAI } from "@google/genai";
@@ -20,11 +22,13 @@ export interface SceneImage {
 }
 
 export class Imagen3Agent {
-  private ai: GoogleGenAI | null;
+  private ai:      GoogleGenAI | null;  // v1beta — used for everything except image gen
+  private aiAlpha: GoogleGenAI | null;  // v1alpha — required for gemini-2.0-flash-exp image gen
 
   constructor() {
     const apiKey = process.env.GOOGLE_API_KEY;
-    this.ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+    this.ai      = apiKey ? new GoogleGenAI({ apiKey }) : null;
+    this.aiAlpha = apiKey ? new GoogleGenAI({ apiKey, apiVersion: "v1alpha" }) : null;
   }
 
   static isAvailable(): boolean {
@@ -35,7 +39,7 @@ export class Imagen3Agent {
    * Generate a single image from a text prompt. Returns the output path on success, null on failure.
    */
   async generateSingleImage(prompt: string, outPath: string): Promise<string | null> {
-    if (!this.ai) {
+    if (!this.aiAlpha) {
       console.warn("[imagen3] GOOGLE_API_KEY not set — skipping image generation");
       return null;
     }
@@ -68,7 +72,7 @@ export class Imagen3Agent {
     slug: string,
     tempDir: string
   ): Promise<SceneImage[]> {
-    if (!this.ai) {
+    if (!this.aiAlpha) {
       console.warn("[imagen3] No GOOGLE_API_KEY — skipping image generation");
       return [];
     }
@@ -107,12 +111,11 @@ export class Imagen3Agent {
   }
 
   /**
-   * Core image generation via Gemini 2.0 Flash (works with AI Studio API key).
-   * Imagen 3 (`models.generateImages()`) hits a Vertex AI /predict endpoint that
-   * requires service-account auth and returns HTTP 404 for plain API keys.
+   * Core image generation via Gemini 2.0 Flash experimental.
+   * Must use apiVersion:"v1alpha" — the model only exists there, not in v1beta.
    */
   private async generateImageBytes(prompt: string): Promise<Buffer> {
-    const response = await this.ai!.models.generateContent({
+    const response = await this.aiAlpha!.models.generateContent({
       model:    "gemini-2.0-flash-exp",
       contents: this.enhancePrompt(prompt),
       config:   { responseModalities: ["IMAGE"] },
