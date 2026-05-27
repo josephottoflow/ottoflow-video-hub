@@ -1,15 +1,15 @@
 /**
- * IMAGEN AGENT — Gemini 2.0 Flash image generation per scene
+ * IMAGEN AGENT — Gemini image generation per scene
  *
  * Uses GOOGLE_API_KEY (already in .env) — no new signup needed.
  * Generates one 9:16 portrait image per scene, saves to temp/{slug}/
  *
- * Model: gemini-2.0-flash-exp (v1alpha API)
+ * Model: gemini-2.5-flash-image (v1beta API — standard client)
  *
- * Critical: gemini-2.0-flash-exp only exists in API version v1alpha, NOT v1beta.
- * The default GoogleGenAI client uses v1beta → 404. A separate client with
- * apiVersion:"v1alpha" is required for image generation.
- * Imagen 3 (models.generateImages) requires Vertex AI service-account auth → unusable.
+ * Note: models.generateImages() uses Vertex AI /predict endpoint → requires
+ * service-account auth, always 404 with AI Studio key → unusable.
+ * generateContent with responseModalities:["IMAGE"] works with AI Studio key.
+ * gemini-2.5-flash-image (displayName: "Nano Banana") confirmed in v1beta model list.
  */
 
 import { GoogleGenAI } from "@google/genai";
@@ -22,13 +22,11 @@ export interface SceneImage {
 }
 
 export class Imagen3Agent {
-  private ai:      GoogleGenAI | null;  // v1beta — used for everything except image gen
-  private aiAlpha: GoogleGenAI | null;  // v1alpha — required for gemini-2.0-flash-exp image gen
+  private ai: GoogleGenAI | null;
 
   constructor() {
     const apiKey = process.env.GOOGLE_API_KEY;
-    this.ai      = apiKey ? new GoogleGenAI({ apiKey }) : null;
-    this.aiAlpha = apiKey ? new GoogleGenAI({ apiKey, apiVersion: "v1alpha" }) : null;
+    this.ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
   }
 
   static isAvailable(): boolean {
@@ -39,7 +37,7 @@ export class Imagen3Agent {
    * Generate a single image from a text prompt. Returns the output path on success, null on failure.
    */
   async generateSingleImage(prompt: string, outPath: string): Promise<string | null> {
-    if (!this.aiAlpha) {
+    if (!this.ai) {
       console.warn("[imagen3] GOOGLE_API_KEY not set — skipping image generation");
       return null;
     }
@@ -60,7 +58,7 @@ export class Imagen3Agent {
         const asStr = JSON.stringify(err);
         if (asStr !== "{}") detail = asStr;
       } catch { /* non-serialisable */ }
-      console.error(`[imagen3] generateSingleImage FAILED — model=gemini-2.0-flash-exp path=${path.basename(outPath)}`);
+      console.error(`[imagen3] generateSingleImage FAILED — model=gemini-2.5-flash-image path=${path.basename(outPath)}`);
       console.error(`[imagen3] error.message: ${msg}`);
       if (detail !== msg) console.error(`[imagen3] error.detail: ${detail.slice(0, 1000)}`);
       return null;
@@ -72,7 +70,7 @@ export class Imagen3Agent {
     slug: string,
     tempDir: string
   ): Promise<SceneImage[]> {
-    if (!this.aiAlpha) {
+    if (!this.ai) {
       console.warn("[imagen3] No GOOGLE_API_KEY — skipping image generation");
       return [];
     }
@@ -111,12 +109,12 @@ export class Imagen3Agent {
   }
 
   /**
-   * Core image generation via Gemini 2.0 Flash experimental.
-   * Must use apiVersion:"v1alpha" — the model only exists there, not in v1beta.
+   * Core image generation via Gemini 2.5 Flash Image (v1beta, AI Studio key).
+   * gemini-2.5-flash-image confirmed in v1beta model list (displayName: "Nano Banana").
    */
   private async generateImageBytes(prompt: string): Promise<Buffer> {
-    const response = await this.aiAlpha!.models.generateContent({
-      model:    "gemini-2.0-flash-exp",
+    const response = await this.ai!.models.generateContent({
+      model:    "gemini-2.5-flash-image",
       contents: this.enhancePrompt(prompt),
       config:   { responseModalities: ["IMAGE"] },
     });
