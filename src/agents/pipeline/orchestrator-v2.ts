@@ -150,9 +150,9 @@ export class PipelineOrchestratorV2 {
           totalFrames: sb.totalFrames,
           fullScript:  sb.fullScript,
           scenes:      sb.scenes,
-        }).catch(() => {}); // non-fatal
+        }).catch((err: unknown) => console.warn(`[v2] saveStoryboard failed: ${err instanceof Error ? err.message : err}`));
         // Store script text and emit to live log for UI visibility
-        updateJobStatus(dbJobId, "processing", { script_text: sb.fullScript }).catch(() => {});
+        updateJobStatus(dbJobId, "processing", { script_text: sb.fullScript }).catch((err: unknown) => console.warn(`[v2] updateJobStatus(processing) failed: ${err instanceof Error ? err.message : err}`));
       }
       emitLog("Script Writer", `Script: ${sb.fullScript}`, "info");
 
@@ -160,11 +160,9 @@ export class PipelineOrchestratorV2 {
       const sheetScript = sb.fullScript;
       const hookLines   = sb.scenes.filter(s => s.beat === "hook").map(s => s.caption);
       await this.sheets.updateScript(rowIndex, sheetScript, hookLines[0] ?? "", hookLines[1] ?? "", hookLines[2] ?? "")
-        .catch(() => {}); // non-fatal
+        .catch((err: unknown) => console.warn(`[v2] sheets.updateScript failed: ${err instanceof Error ? err.message : err}`));
 
       // ── Step 2: ElevenLabs voiceover from fullScript ──────────────────────
-      const publicContent = path.resolve("public", "content", slug);
-      fs.mkdirSync(publicContent, { recursive: true });
 
       // V2 canonical voice: "bright friendly" (Gigi — creator-native TikTok cadence).
       // Sheet col G overrides if set; otherwise default to bright friendly.
@@ -187,7 +185,6 @@ export class PipelineOrchestratorV2 {
       const clipUrlMap: Record<string, string> = {};
       const imageUrlMap: Record<string, string> = {};
 
-      const localPort = process.env.PORT || "3000";
       if (VeoAgent.isAvailable()) {
         this.veo.resetQuota(); // fresh attempt — clears any quota flag from a prior job on this instance
         emitLog("V2-Orchestrator", `Generating ${sb.scenes.length} Veo clips (serialized — avoids burst 429)...`, "info");
@@ -207,28 +204,34 @@ export class PipelineOrchestratorV2 {
             const clipSizeMb    = (clipSizeBytes / 1024 / 1024).toFixed(2);
             let clipUrl: string | undefined;
             if (isR2Available()) {
-              try { clipUrl = await uploadFileToR2(`clips/${slug}/${outFile}`, clipPath, "video/mp4"); } catch { /* fall through */ }
-            }
-            if (!clipUrl) {
-              const destPublic = path.join(publicContent, outFile);
-              try { fs.copyFileSync(clipPath, destPublic); } catch (copyErr) {
-                TRACE_ERR(`Veo[${i+1}] copy to public FAILED: ${copyErr instanceof Error ? copyErr.message : copyErr} — src=${clipPath} dest=${destPublic}`);
+              try {
+                clipUrl = await uploadFileToR2(`clips/${slug}/${outFile}`, clipPath, "video/mp4");
+              } catch (r2Err) {
+                console.error(`[v2] R2 upload FAILED for Veo clip ${outFile}: ${r2Err instanceof Error ? r2Err.message : r2Err}`);
               }
-              clipUrl = `http://localhost:${localPort}/content/${slug}/${outFile}`;
+            } else {
+              console.error(`[v2] R2 not configured — Veo clip ${outFile} cannot be stored. Scene ${scene.id} will use Imagen3 fallback.`);
             }
-            clipUrlMap[scene.id] = clipUrl;
-            emitLog("V2-Orchestrator", `Veo clip ${i+1}/${sb.scenes.length} ✅ — ${scene.beat} (${veoDur}s, ${clipSizeMb}MB)`, "success");
-            TRACE(`Veo[${i+1}] SUCCESS: bytes=${clipSizeBytes} sizeMb=${clipSizeMb} exists=${fs.existsSync(outPath)} url=${clipUrl}`);
+            if (clipUrl) {
+              clipUrlMap[scene.id] = clipUrl;
+              console.log(`[v2] Veo clip ${scene.id} stored → ${clipUrl.slice(-70)}`);
+              emitLog("V2-Orchestrator", `Veo clip ${i+1}/${sb.scenes.length} ✅ — ${scene.beat} (${veoDur}s, ${clipSizeMb}MB)`, "success");
+              TRACE(`Veo[${i+1}] SUCCESS: bytes=${clipSizeBytes} sizeMb=${clipSizeMb} url=${clipUrl}`);
+            } else {
+              console.error(`[v2] Veo clip ${scene.id} generated (${clipSizeMb}MB) but R2 storage failed — scene falls through to Imagen3`);
+              emitLog("V2-Orchestrator", `Veo clip ${i+1}/${sb.scenes.length} generated but R2 upload failed → Imagen3 fallback`, "warning");
+            }
           } else {
+            console.error(`[v2] Veo FAILED scene=${scene.id} beat=${scene.beat} — will use Imagen3 fallback`);
             emitLog("V2-Orchestrator", `Veo scene ${scene.id} ❌ — will use Imagen3 fallback`, "warning");
             TRACE_ERR(`Veo[${i+1}] FAILED: scene=${scene.id} beat=${scene.beat}`);
           }
           // 5s gap between Veo requests — keeps burst rate under 4 QPM ceiling
           if (i < sb.scenes.length - 1) await new Promise(r => setTimeout(r, 5_000));
         }
-        TRACE(`Veo batch done in ${Date.now()-_t}ms — ${Object.keys(clipUrlMap).length}/${sb.scenes.length} clips generated. Missing: ${sb.scenes.filter(s=>!clipUrlMap[s.id]).map(s=>s.id).join(",")||"none"}`);
+        console.log(`[v2] Veo batch done in ${Date.now()-_t}ms — ${Object.keys(clipUrlMap).length}/${sb.scenes.length} clips stored in R2. Missing: ${sb.scenes.filter(s=>!clipUrlMap[s.id]).map(s=>s.id).join(",")||"none"}`);
       } else {
-        TRACE(`Veo SKIPPED — GOOGLE_API_KEY not set`);
+        console.log(`[v2] Veo SKIPPED — GOOGLE_API_KEY not set. All scenes will use Imagen3 fallback.`);
       }
 
       // ── Step 4: Imagen3 static fallback for scenes missing a clip ─────────
@@ -247,24 +250,32 @@ export class PipelineOrchestratorV2 {
               const imgSizeKb = Math.round(fs.statSync(imgPath).size / 1024);
               let imgUrl: string | undefined;
               if (isR2Available()) {
-                try { imgUrl = await uploadFileToR2(`images/${slug}/${destFile}`, imgPath, "image/jpeg"); } catch { /* fall through */ }
+                try {
+                  imgUrl = await uploadFileToR2(`images/${slug}/${destFile}`, imgPath, "image/jpeg");
+                } catch (r2Err) {
+                  console.error(`[v2] R2 upload FAILED for Imagen3 image ${destFile}: ${r2Err instanceof Error ? r2Err.message : r2Err}`);
+                }
+              } else {
+                console.error(`[v2] R2 not configured — Imagen3 image ${destFile} cannot be stored. Scene ${scene.id} will render procedural.`);
               }
-              if (!imgUrl) {
-                try { fs.copyFileSync(imgPath, path.join(publicContent, destFile)); } catch { /* skip */ }
-                imgUrl = `http://localhost:${localPort}/content/${slug}/${destFile}`;
+              if (imgUrl) {
+                imageUrlMap[scene.id] = imgUrl;
+                console.log(`[v2] Imagen3 scene ${scene.id} stored → ${imgUrl.slice(-70)} (${imgSizeKb}KB)`);
+                TRACE(`Imagen3: SUCCESS scene=${scene.id} ${imgSizeKb}KB → ${imgUrl}`);
+              } else {
+                console.error(`[v2] Imagen3 scene ${scene.id} generated (${imgSizeKb}KB) but R2 storage failed — scene will render procedural background`);
               }
-              imageUrlMap[scene.id] = imgUrl;
-              TRACE(`Imagen3: SUCCESS scene=${scene.id} ${imgSizeKb}KB → ${imgUrl}`);
             } else {
+              console.error(`[v2] Imagen3: scene=${scene.id} returned null — scene will render procedural background`);
               TRACE_ERR(`Imagen3: scene=${scene.id} returned null — scene will render with gradient background only`);
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
+            console.error(`[v2] Imagen3 EXCEPTION scene=${scene.id}: ${msg}`);
             emitLog("V2-Orchestrator", `⚠️ Imagen3 failed for ${scene.id} — scene will use gradient background`, "warning");
-            TRACE_ERR(`Imagen3 EXCEPTION scene=${scene.id}: ${msg}`);
           }
         }));
-        TRACE(`Imagen3 batch done in ${Date.now()-_t}ms — ${Object.keys(imageUrlMap).length} images. Missing assets: ${missingScenes.filter(s=>!imageUrlMap[s.id]).map(s=>s.id).join(",")||"none"}`);
+        console.log(`[v2] Imagen3 batch done in ${Date.now()-_t}ms — ${Object.keys(imageUrlMap).length} images stored in R2. Missing: ${missingScenes.filter(s=>!imageUrlMap[s.id]).map(s=>s.id).join(",")||"none"}`);
       }
       setStatus("running", row.topic, 55);
 
@@ -284,14 +295,18 @@ export class PipelineOrchestratorV2 {
               const destFile = `lipsync-${insightScene.id}.mp4`;
               let lipsyncUrl: string | undefined;
               if (isR2Available()) {
-                try { lipsyncUrl = await uploadFileToR2(`clips/${slug}/${destFile}`, lipsyncClip, "video/mp4"); } catch { /* fall through */ }
+                try {
+                  lipsyncUrl = await uploadFileToR2(`clips/${slug}/${destFile}`, lipsyncClip, "video/mp4");
+                } catch (r2Err) {
+                  console.warn(`[v2] R2 upload failed for lipsync clip: ${r2Err instanceof Error ? r2Err.message : r2Err} — lipsync skipped`);
+                }
               }
-              if (!lipsyncUrl) {
-                try { fs.copyFileSync(lipsyncClip, path.join(publicContent, destFile)); } catch { /* ignore */ }
-                lipsyncUrl = `http://localhost:${localPort}/content/${slug}/${destFile}`;
+              if (lipsyncUrl) {
+                clipUrlMap[insightScene.id] = lipsyncUrl;
+                emitLog("V2-Orchestrator", "Talking head ready", "success");
+              } else {
+                console.warn(`[v2] Lipsync generated but R2 upload failed — skipping lipsync for scene ${insightScene.id}`);
               }
-              clipUrlMap[insightScene.id] = lipsyncUrl;
-              emitLog("V2-Orchestrator", "Talking head ready", "success");
             }
           }
         } catch (err) {
@@ -309,7 +324,10 @@ export class PipelineOrchestratorV2 {
         fontWeight: "bold", textEffect: "shadow", rationale: `V2 ${sb.visualStyle}`,
         brandColors: { primary: "#ffffff", secondary: "#cccccc", accent: "#FFE500", background: "#000000", text: "#ffffff" },
       };
-      const musicTrack = await this.music.selectTrack(row, designStub, slug, tempDir, musicVibe).catch(() => null);
+      const musicTrack = await this.music.selectTrack(row, designStub, slug, tempDir, musicVibe).catch((err: unknown) => {
+        console.warn(`[v2] Music selection failed: ${err instanceof Error ? err.message : err} — video will have no background music`);
+        return null;
+      });
       setStatus("running", row.topic, 62);
 
       // ── Step 6: Assemble storyboard data for Remotion ─────────────────────
@@ -330,6 +348,32 @@ export class PipelineOrchestratorV2 {
         const src  = clip ? `VEO:${clip.slice(-40)}` : img ? `IMG:${img.slice(-40)}` : "PROCEDURAL (dark gradient)";
         console.log(`  scene${i+1} [${scene.beat}] → ${src}`);
       });
+
+      // ── Pre-render asset validation ───────────────────────────────────────
+      // Safety net: catch any localhost URLs that leaked through (should never happen after P0 fix).
+      // Also logs a clean Railway-visible confirmation that all assets are R2 or procedural.
+      {
+        const localhostScenes = storyboardData.scenes.filter(s =>
+          s.videoClipPath?.includes("localhost") || s.imagePath?.includes("localhost")
+        );
+        if (localhostScenes.length > 0) {
+          console.error(`[v2] ASSET VALIDATION FAILED: ${localhostScenes.length} scene(s) have localhost URLs — will 404 in Railway:`);
+          localhostScenes.forEach(s => {
+            if (s.videoClipPath?.includes("localhost")) console.error(`  scene ${s.id} clip: ${s.videoClipPath}`);
+            if (s.imagePath?.includes("localhost"))     console.error(`  scene ${s.id} image: ${s.imagePath}`);
+          });
+          for (const s of storyboardData.scenes) {
+            if (s.videoClipPath?.includes("localhost")) { s.videoClipPath = undefined; }
+            if (s.imagePath?.includes("localhost"))     { s.imagePath = ""; }
+          }
+          console.error(`[v2] ASSET VALIDATION: cleared bad localhost URLs — affected scenes will render procedural`);
+        } else {
+          const veoCount  = Object.keys(clipUrlMap).length;
+          const imgCount  = Object.keys(imageUrlMap).length;
+          const procCount = sb.scenes.length - veoCount - imgCount;
+          console.log(`[v2] Asset validation OK — Veo:${veoCount} Imagen3:${imgCount} Procedural:${procCount} / ${sb.scenes.length} scenes`);
+        }
+      }
 
       const videoData: V2UGCData = {
         topic:      row.topic,
@@ -386,12 +430,18 @@ export class PipelineOrchestratorV2 {
         emitLog("V2-Orchestrator", `FFmpeg done — ${((ffResult.fileSizeBytes || 0) / 1024 / 1024).toFixed(1)}MB`, "success");
         TRACE(`FFmpeg output: ${ffResult.outputPath} size=${((ffResult.fileSizeBytes||0)/1024/1024).toFixed(1)}MB durationMs=${ffResult.durationMs}`);
       } else {
+        console.error(`[v2] FFmpeg FAILED: ${ffResult.error} — falling back to raw Remotion output. Video will be delivered WITHOUT audio mix.`);
         TRACE_ERR(`FFmpeg FAILED: ${ffResult.error} — falling back to raw render at ${finalVideoPath}`);
       }
 
       const finalVideo = path.join(outDir, `${slug}.mp4`);
       TRACE(`Copying ${finalVideoPath} → ${finalVideo}`);
-      fs.copyFileSync(finalVideoPath, finalVideo);
+      try {
+        fs.copyFileSync(finalVideoPath, finalVideo);
+      } catch (copyErr) {
+        throw new Error(`Failed to copy final video to output dir: ${copyErr instanceof Error ? copyErr.message : copyErr}`);
+      }
+      console.log(`[v2] Final video ready: ${(fs.statSync(finalVideo).size/1024/1024).toFixed(1)}MB → ${finalVideo}`);
       TRACE(`Final video size: ${(fs.statSync(finalVideo).size/1024/1024).toFixed(1)}MB`);
 
       // Upload final video to R2 for cloud access (Remotion preview + Telegram)

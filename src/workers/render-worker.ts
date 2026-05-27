@@ -17,6 +17,7 @@ import * as path from "path";
 import { Worker, Job } from "bullmq";
 import { getRenderRedis, getRenderQueue, RENDER_QUEUE, RenderJobData } from "../lib/queue";
 import { enqueueRender } from "../lib/queue";
+import { isR2Available, uploadToR2, deleteFromR2 } from "../lib/r2";
 import { PipelineOrchestrator }   from "../agents/pipeline/orchestrator";
 import { PipelineOrchestratorV2 } from "../agents/pipeline/orchestrator-v2";
 import { updateJobStatus, markStuckJobsError, getJob, touchWorkerHeartbeat, runMigrations, updateJobProgress, createJob } from "../lib/db";
@@ -193,6 +194,24 @@ async function checkRedis(): Promise<void> {
   }
 }
 
+async function checkR2(): Promise<void> {
+  if (!isR2Available()) {
+    console.warn("[worker] ⚠️  R2 NOT CONFIGURED — V2 pipeline requires R2 for Veo/Imagen3 asset storage.");
+    console.warn("[worker]    Without R2: all V2 scenes render as procedural backgrounds (no AI images/clips).");
+    console.warn("[worker]    Set: R2_ACCOUNT_ID, R2_ACCESS_KEY, R2_SECRET_KEY, R2_BUCKET, R2_PUBLIC_URL");
+    return;
+  }
+  try {
+    const testKey = `_health/worker-ping-${Date.now()}.txt`;
+    await uploadToR2(testKey, Buffer.from("ok"), "text/plain");
+    await deleteFromR2(testKey);
+    console.log("[worker] R2 connectivity verified ✓");
+  } catch (err) {
+    console.error("[worker] R2 connectivity check FAILED:", err instanceof Error ? err.message : err);
+    console.error("[worker] Veo/Imagen3 assets will fail to upload. Verify R2_ACCESS_KEY, R2_SECRET_KEY, R2_BUCKET, R2_PUBLIC_URL.");
+  }
+}
+
 // Purge temp dirs older than MAX_TEMP_AGE_MS on startup + after each render.
 // Prevents disk exhaustion from accumulated failed render artifacts.
 const TEMP_DIR_PATH    = path.resolve(process.env.TEMP_DIR ?? "./temp");
@@ -318,6 +337,7 @@ async function startup() {
   probeEnv();
   startStaticServer();
   await checkRedis();
+  await checkR2();
 
   // Ensure DB schema is up to date (idempotent — safe on every startup)
   try {
