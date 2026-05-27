@@ -1,10 +1,17 @@
 /**
- * STORYBOARD AGENT — Gemini-powered creative director
+ * STORYBOARD AGENT — Gemini-powered TikTok/Reels UGC creative director
  * Generates a complete dynamic JSON storyboard per render.
  * Every call produces different scene count, pacing, visual style, and narrative arc.
+ * Architecture spec: storyboard-architecture.json
  */
 
 import { GoogleGenAI } from "@google/genai";
+import * as path from "path";
+import * as fs from "fs";
+
+const ARCH = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "storyboard-architecture.json"), "utf-8")
+);
 
 export type VisualStyle  = "dark-cinematic" | "bright-minimal" | "neon-tech" | "warm-story" | "high-contrast";
 export type CaptionStyle = "impact" | "word-by-word" | "slide-up" | "pulse";
@@ -110,7 +117,18 @@ export class StoryboardAgent {
       ? `\nSEED SCRIPT (use this as inspiration — preserve the angle and facts, improve the pacing):\n"${existingScript.trim()}"\n`
       : "";
 
-    const prompt = `You are a TikTok cinematic creative director and storyboard artist. Generate a complete video storyboard JSON for a short-form vertical video that looks and feels like a high-performing creator video — NOT a stock ad, NOT a corporate explainer, NOT a generic AI video.
+    // Pull example prompts and quality rules from architecture spec
+    const examplePrompts = Object.values(ARCH.example_ugc_prompts as Record<string, string>)
+      .map((p, i) => `EXAMPLE ${String.fromCharCode(65 + i)}: "${p}"`)
+      .join("\n\n");
+
+    const avoidList = (ARCH.quality_rules.avoid as string[]).map(x => `❌ ${x}`).join("\n");
+    const includeList = (ARCH.quality_rules.always_include as string[]).map(x => `✅ ${x}`).join("\n");
+
+    const prompt = `${ARCH.system_role}
+
+You are generating a TikTok/Reels creator video — NOT a luxury commercial, NOT a SaaS ad, NOT a cinematic trailer.
+Every scene must feel like a real creator filmed it on their phone. Authentic, imperfect, emotionally true.
 
 TOPIC: "${topic}"
 CONTENT STYLE: "${style}"
@@ -118,136 +136,119 @@ NARRATIVE VARIANT: ${renderVariant}
 HOOK STYLE: ${hookStyle} — ${hookGuide}${seedNote}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 0 — LOCK THE CREATOR PERSONA (do this before any scene)
+STEP 0 — LOCK THE CREATOR PERSONA (before any scene)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Before writing a single scene, decide and LOCK:
-1. Creator type: (e.g. "25yo productivity nerd in home office", "burned-out corporate worker who escaped", "street-smart entrepreneur in urban apartment", "wellness creator in minimalist studio")
-2. Platform energy: (e.g. "confessional and raw", "confident and slightly controversial", "genuinely excited about a discovery", "frustrated truth-teller")
-3. Signature environment: ONE real location that persists across ALL or most scenes (e.g. "cramped home desk with sticky notes and coffee rings", "parked car dashboard in rain", "kitchen table at 6am", "crowded café corner booth")
-4. Signature lighting: ONE lighting scenario that defines the look (e.g. "morning window light left side", "monitor glow in dark room", "golden hour through apartment window", "fluorescent office light")
+Lock these BEFORE writing any scene. All scenes inherit them.
 
-ALL scenes must feel like they belong to the SAME creator in the SAME visual world.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 1 — VISUAL THEME (locked before any scene is written)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Pick ONE visual style and LOCK these shared values for every scene:
-- palette: 3-4 specific hex values or named colors dominant in the environment
-- lighting: the one real-world light source that defines the look (natural/practical only — NO "dramatic lighting", NO "rim light")
-- lens: lens character that matches a smartphone creator (shallow DOF portrait mode, slight natural vignette, etc.)
-- filmLook: subtle grade (muted saturation, slight grain, warm/cool temp — never "cinematic grade" as a vague catch-all)
-- motion: the camera's personality (slight natural handheld drift, creator self-filmed push-in, documentary follow, etc.)
-
-Visual style presets (pick the one that fits the topic and creator):
-- "dark-cinematic": dim room, phone or laptop screen glow as key, deep natural shadows, raw confessional energy, dim practical lamp in background
-- "bright-minimal": clean natural window light, soft background bokeh, airy home studio, smartphone portrait mode feel
-- "neon-tech": late-night urban energy, monitor or neon sign as key light, high saturation, fast cuts
-- "warm-story": golden hour through window or car windshield, organic warm bokeh, emotional human connection
-- "high-contrast": strong directional window light vs deep shadow, high-stakes confession, documentary urgency
+1. Creator archetype — one specific human: (e.g. "25yo productivity obsessive at cluttered home desk", "burned-out corporate worker who escaped", "self-taught entrepreneur in city apartment")
+2. Platform energy — their emotional register: (e.g. "confessional and raw", "frustrated truth-teller", "genuinely excited about a discovery", "conspiratorial friend sharing something private")
+3. Signature environment — ONE real location that persists: (e.g. "cluttered home desk with sticky notes and cold coffee", "parked car in light rain", "kitchen table at 6am", "bedroom floor against bed frame")
+4. Signature lighting — ONE real-world light source: (e.g. "laptop screen glow in dark room", "east window morning light", "golden hour through apartment window", "warm floor lamp behind creator")
+5. Axis lock — pick a facing direction in s1 and NEVER flip it. 180° rule enforced across ALL scenes.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-NARRATIVE ARC (follow this scene structure exactly):
+STEP 1 — LOCK VISUAL IDENTITY (before any scene)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Pick ONE visual style preset and lock ALL values for every scene:
+
+${Object.entries(ARCH.visual_style_presets as Record<string, { environment: string; energy: string; lighting: string; film_look: string }>)
+  .map(([key, v]) => `- "${key}": ${v.environment} | ${v.energy} | ${v.lighting}`)
+  .join("\n")}
+
+Lock:
+- palette: 3-4 specific environment colors (hex or named)
+- lighting: the ONE real light source (practical/natural only — no "dramatic lighting", no "rim light setup")
+- lens: smartphone portrait feel — shallow DOF, natural vignette, imperfect corners
+- filmLook: muted saturation, slight grain, warm or cool temp — never "cinematic grade" as a vague catch-all
+- motion: camera personality that matches filming context (self-filmed drift, documentary follow, locked with lens breathing)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+NARRATIVE ARC — follow this exactly:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ${variantGuide}
+
+Emotional continuity arc for ${renderVariant}:
+${(ARCH.emotional_continuity.arc_types as Record<string, string>)[renderVariant] ?? "frustrated → exposed → realized → relieved → inviting"}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STEP 2 — EACH SCENE: 10-POINT SHOT SPEC
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-For EVERY scene, mentally spec out all 10 points before writing the visualPrompt:
-1. Scene purpose: what this scene accomplishes emotionally (hook, destabilize, reveal, ground, invite)
-2. Emotional tone: creator's emotional state in this scene (frustrated, genuinely shocked, confiding, calm, energized)
-3. Camera framing: exact shot type (ECU / CU / MCU / MS / WS)
-4. Camera angle: eye level / low / high / OTS / dutch
-5. Creator behavior: ONE specific micro-action the creator performs (jaw tight, leans forward 3 inches, exhales sharply, pushes glasses up, looks off then back to camera)
-6. Environment detail: 2-3 specific real-world objects visible (sticky note on monitor, half-empty coffee mug, tangled headphone cable, rain on car window, plant in background)
-7. Lighting: exact source and quality (morning sun from east window spilling across left shoulder, phone screen glow catching chin and nose, practical floor lamp creating warm pool behind subject)
-8. Camera movement: specific move (slight natural drift, slow creator self-film push-in 3cm, documentary follow, locked frame with subtle lens breathing)
-9. Social-native qualifier: one phrase that grounds it in TikTok reality (authentic street energy, intimate confession frame, handheld vlog realism, documentary interview pacing)
-10. Veo prompt synthesis: collapse all 9 points into the visualPrompt
+For EVERY scene, mentally work through all 10 before writing the visualPrompt:
+1. Scene purpose: emotional job this scene does (hook, destabilize, reveal, ground, invite)
+2. Creator emotional state: ONE word (frustrated, shocked, confiding, certain, energized)
+3. Shot type: ECU / CU / MCU / MS / WS — alternate, never repeat consecutive
+4. Camera angle: eye level / slightly low / slightly high / OTS
+5. ONE micro-action: jaw tightens, exhales through nose, leans forward 3cm, glances off then back, hand wraps tighter around mug
+6. 2-3 specific objects: sticky notes on monitor, tangled cable, cold coffee, rain on windshield, book spine visible
+7. Exact light source: "laptop screen catching chin and nose", "east window morning light across left shoulder", "warm lamp creating separation behind"
+8. Camera behavior: "slight handheld drift", "slow self-film push-in 3cm", "documentary follow with slight lag", "locked with subtle lens breathing"
+9. Social-native qualifier: one phrase anchoring it in TikTok reality
+10. Synthesize all 9 → visualPrompt
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-REFERENCE SHOT EXAMPLES (match this energy and specificity):
+REFERENCE PROMPTS (match this energy and specificity):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EXAMPLE A — Street interview: "Handheld MCU of creator approaching strangers in downtown city environment at dusk, natural pedestrian flow behind, imperfect framing with slight horizon tilt, creator genuinely reacting to responses, social-native documentary pacing, urban ambient light, 9:16 vertical portrait"
-
-EXAMPLE B — Car confession: "Creator-POV CU inside parked car during light rain, dashboard glow as only light source, windshield raindrops creating bokeh, creator leaning slightly toward phone with jaw tight and exhale visible, intimate TikTok confession energy, subtle natural camera drift, 9:16 vertical portrait"
-
-EXAMPLE C — Night market: "Handheld MLS creator walking through crowded night market, neon sign reflections on wet pavement, creator turning back to camera mid-stride with genuine reaction, natural crowd movement, documentary street energy, slight camera sway from walking, 9:16 vertical portrait"
-
-EXAMPLE D — Home office reveal: "Creator-POV slow push-in MCU at cluttered desk, monitor casting blue light on face, sticky notes visible on screen edge, creator leaning in with visible tension in shoulders like sharing something they shouldn't, dim room with single warm lamp behind, authentic imperfection, slight lens breathing, 9:16 vertical portrait"
-
-EXAMPLE E — Kitchen confession: "Handheld CU of creator at kitchen table 6am, one hand wrapped around mug, window light barely starting, honest unpolished morning energy, slightly unfocused eyes that sharpen to camera, no performative presentation just real, 9:16 vertical portrait"
+${examplePrompts}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-VEO-SPECIFIC REQUIREMENTS (these generate real AI video):
+VEO REQUIREMENTS — motion-first thinking:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Veo generates MOTION from your text. Write prompts that describe BELIEVABLE MOTION:
-✅ DO: walking movement, natural breathing, subtle head turn, slight lean, hand gestures, environmental motion (rain, crowd, steam from mug)
-✅ DO: specific real-world textures (rain on glass, laptop fan glow, book pages)
-✅ DO: simple human behaviors with natural physics
-❌ DON'T: text overlays, UI elements, logos, graphs, impossible camera moves
-❌ DON'T: "dramatic lighting" / "cinematic grade" / "epic" / "stunning" (too generic)
-❌ DON'T: describe multiple rapid scene cuts WITHIN one visualPrompt (Veo renders ONE continuous shot)
-❌ DON'T: complex multi-person interactions or impossible spatial movements
-
-Each visualPrompt generates ONE 4-8 second continuous shot. Think: what would a creator actually film in one take?
+Veo renders ONE continuous shot from your prompt. Describe BELIEVABLE MOTION:
+✅ Natural breathing, slight lean, subtle head turn, hand gestures, environmental motion (rain, steam, crowd)
+✅ Specific textures: rain on glass, mug steam, laptop fan glow, book pages
+✅ Simple human physics — one action at a time
+❌ Text overlays, logos, UI, graphs in the prompt
+❌ Multiple cuts described in one prompt
+❌ Impossible camera moves (orbit, crane, dolly track)
+❌ Generic language: "dramatic", "cinematic grade", "epic", "stunning", "luxury"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SHOT TYPES:
+QUALITY RULES:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ECU (Extreme Close-Up): eyes only, specific object detail, intense emotion
-CU (Close-Up): face fills frame, confession, reaction
-MCU (Medium Close-Up): head + shoulders, conversation, interview feel
-MS (Medium Shot): waist up, action + dialogue
-WS (Wide Shot): environment dominant, establishing context
-NEVER repeat the same shot type in consecutive scenes.
+${includeList}
 
-CONTINUITY — enforce across ALL scenes:
-- 180° rule: if creator faces right in s1, they face right in s2-s5. Never flip axis.
-- Environment continuity: unless the variant changes location, keep the same room/setting
-- Shot variety: tight → wide → medium → tight (alternate always)
+${avoidList}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CAPTION + TIMING RULES:
+CAPTION + TIMING:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- Narration per scene: 6-12 words ONLY. Punchy. No filler. No passive voice.
+- Narration: 6-12 words per scene, punchy, no filler, no passive voice
 - Total narration: 30-45 words across ALL scenes
-- caption: 2-3 POWER WORDS. No articles (a/an/the). All caps.
-- keyWord: ONE word (lowercase) from caption — most impactful
-- frames = seconds × 30 (integer)
+- caption: 2-3 POWER WORDS, no articles, ALL CAPS
+- keyWord: ONE word (lowercase) — the most emotionally loaded word in the caption
+- frames = seconds × 30
 - zoomDir: vary — never same direction in consecutive scenes
 - captionStyle: "impact" for hook/cta | "word-by-word" for revelation | "slide-up" for insight | "pulse" for proof
-
-MUSIC MOODS: tense | uplifting | mysterious | energetic | calm
+- musicMood: tense | uplifting | mysterious | energetic | calm
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FINAL QUALITY CHECK (before outputting JSON):
+FINAL CHECK before outputting:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Does every visualPrompt describe ONE continuous shot a creator could realistically film?
-2. Does every scene feel like it belongs to the SAME creator in the SAME visual world?
-3. Is there natural believable motion described in every shot?
-4. Are shot types alternated (no two CUs in a row)?
-5. Is there a specific behavioral micro-action in every scene?
-6. Does the final output feel like a real TikTok, not a stock ad?
+1. Every visualPrompt = ONE continuous shot a creator could film in one take?
+2. Every scene belongs to the SAME creator in the SAME visual world?
+3. Believable motion described in every shot?
+4. Shot types alternated — no two identical types in a row?
+5. ONE specific micro-action per scene?
+6. Does the complete video feel like a real TikTok, not a stock commercial?
 
 Return ONLY valid JSON (no markdown, no explanation):
 {
   "visualStyle": "dark-cinematic",
   "musicMood": "tense",
   "visualTheme": {
-    "palette": "deep charcoal #1a1a2e, monitor blue-white, warm amber lamp glow",
-    "lighting": "monitor glow as key light on face, single warm practical lamp behind, window dark outside",
-    "lens": "shallow depth of field, smartphone portrait mode, natural vignette",
-    "filmLook": "subtle film grain, muted saturation, cool 5500K with warm background contrast",
-    "motion": "slight natural handheld drift, creator self-film slow push-in"
+    "palette": "deep charcoal #1a1a2e, monitor blue-white #d4e9ff, warm amber lamp #ffbf00",
+    "lighting": "laptop screen as sole key light — cold blue-white on face in dark room, warm lamp creating background separation",
+    "lens": "shallow depth of field, smartphone portrait mode, natural background melt, slight vignette",
+    "filmLook": "subtle film grain, muted saturation, cool 5500K screen temp with warm background contrast",
+    "motion": "slight natural handheld drift, creator self-film slow push-in 3cm"
   },
   "scenes": [
     {
       "id": "s1", "beat": "hook", "seconds": 4, "frames": 120,
-      "narration": "6-12 words max, punchy, no filler",
+      "narration": "6-12 words max, punchy, first-person, no filler",
       "composition": "MCU, eye level",
-      "cameraMove": "creator-POV handheld slight drift",
-      "visualPrompt": "Creator-POV MCU of person at cluttered home desk mid-rant, monitor glow casting blue-white light across frustrated face, sticky notes visible on screen edges, tangled headphone cable on desk surface, leaning 3 inches toward camera with jaw tight and visible tension in shoulders, dim room with warm lamp glow behind, slight natural camera drift, authentic confessional TikTok energy, 9:16 vertical portrait",
+      "cameraMove": "slight natural handheld drift",
+      "visualPrompt": "Creator-POV MCU of person in late 20s at cluttered home desk mid-rant, laptop screen casting cold blue-white light across frustrated face in dim room, sticky notes on monitor edges visible, tangled headphone cable in foreground, leaning 3cm toward camera with jaw tight and shoulders forward, slight natural handheld drift, authentic TikTok confessional energy, 9:16 vertical portrait",
       "caption": "POWER WORDS", "keyWord": "word", "zoomDir": "in", "captionStyle": "impact"
     }
   ]
@@ -293,11 +294,11 @@ Return ONLY valid JSON (no markdown, no explanation):
       });
 
       const visualTheme: VisualTheme = {
-        palette:  raw.visualTheme?.palette  ?? "cinematic tones",
-        lighting: raw.visualTheme?.lighting ?? "dramatic rim lighting",
-        lens:     raw.visualTheme?.lens     ?? "shallow depth of field",
-        filmLook: raw.visualTheme?.filmLook ?? "subtle film grain",
-        motion:   raw.visualTheme?.motion   ?? "slow dolly push-ins",
+        palette:  raw.visualTheme?.palette  ?? "deep charcoal, monitor blue-white, warm lamp amber",
+        lighting: raw.visualTheme?.lighting ?? "laptop screen glow as key light, warm practical lamp behind",
+        lens:     raw.visualTheme?.lens     ?? "shallow depth of field, smartphone portrait mode, natural vignette",
+        filmLook: raw.visualTheme?.filmLook ?? "subtle film grain, muted saturation, slight warm-cool contrast",
+        motion:   raw.visualTheme?.motion   ?? "slight natural handheld drift, creator self-film slow push-in",
       };
 
       const fullScript  = scenes.map(s => s.narration).filter(Boolean).join(" ");
@@ -351,11 +352,11 @@ Return ONLY valid JSON (no markdown, no explanation):
     const totalFrames = scenes.reduce((sum, s) => sum + s.frames, 0);
 
     const fallbackTheme: VisualTheme = {
-      palette:  "deep charcoal #1a1a2e, electric indigo #6366f1, warm white #f8fafc",
-      lighting: "natural window light from left as key, ambient room fill, practical phone screen glow in darker scenes",
-      lens:     "shallow depth of field, smartphone portrait mode feel, natural background bokeh",
-      filmLook: "subtle film grain, muted saturation, warm 3200K color temperature",
-      motion:   "slight natural handheld drift, creator-POV slow phone push-ins",
+      palette:  "deep charcoal #1a1a2e, monitor blue-white #d4e9ff, warm amber lamp #ffbf00, dark wood #5b4a3a",
+      lighting: "laptop screen as sole key light in dark room, warm practical floor lamp creating background separation",
+      lens:     "shallow depth of field, smartphone portrait mode, natural background melt, slight vignette",
+      filmLook: "subtle film grain, muted saturation, cool screen temp contrasting warm ambient",
+      motion:   "slight natural handheld drift, creator self-film slow push-in 3cm",
     };
 
     return { topic, visualStyle: "dark-cinematic", musicMood: "tense", visualTheme: fallbackTheme, totalFrames, fullScript, scenes };
