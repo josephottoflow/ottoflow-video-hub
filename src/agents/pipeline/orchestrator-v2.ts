@@ -363,7 +363,7 @@ export class PipelineOrchestratorV2 {
             if (s.imagePath?.includes("localhost"))     console.error(`  scene ${s.id} image: ${s.imagePath}`);
           });
           for (const s of storyboardData.scenes) {
-            if (s.videoClipPath?.includes("localhost")) { s.videoClipPath = undefined; }
+            if (s.videoClipPath?.includes("localhost")) { s.videoClipPath = ""; }
             if (s.imagePath?.includes("localhost"))     { s.imagePath = ""; }
           }
           console.error(`[v2] ASSET VALIDATION: cleared bad localhost URLs — affected scenes will render procedural`);
