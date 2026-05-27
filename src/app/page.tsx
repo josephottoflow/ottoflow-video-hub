@@ -30,7 +30,7 @@ interface Services { anthropic: boolean; gemini: boolean; elevenlabs: boolean; p
 
 // ─── Advanced App Types ───────────────────────────────────────
 
-type AdvSection = "overview" | "pipelines" | "workers" | "logs" | "costs" | "queue";
+type AppView    = "mission" | "storyboard" | "pipeline" | "approvals" | "identity" | "health";
 
 interface PipelineStage {
   pipeline_id: string;
@@ -97,20 +97,6 @@ interface AICosts {
 
 // ─── Pipeline definition ──────────────────────────────────────
 
-const PIPELINE_AGENTS = [
-  { id: "Sheets Client",  label: "Sheets Client",  Icon: FileSpreadsheet, desc: "Reads pending rows" },
-  { id: "Script Writer",  label: "Script Writer",  Icon: Wand2,           desc: "Hooks + script" },
-  { id: "Design Agent",   label: "Design Agent",   Icon: Layers,          desc: "Theme & colors" },
-  { id: "Storyboard",     label: "Storyboard",     Icon: Clapperboard,    desc: "Shot plan" },
-  { id: "Music Director", label: "Music Director", Icon: Music2,          desc: "Background music" },
-  { id: "Prompt Engine",  label: "Prompt Engine",  Icon: Zap,             desc: "Video structure" },
-  { id: "Pexels Client",  label: "Pexels Client",  Icon: Image,           desc: "Backgrounds" },
-  { id: "Branding Agent", label: "Branding Agent", Icon: Tag,             desc: "Ottoflow brand" },
-  { id: "Render Agent",   label: "Render Agent",   Icon: Video,           desc: "MP4 render" },
-  { id: "FFmpeg Agent",   label: "FFmpeg Agent",   Icon: Film,            desc: "Grade + music mix" },
-  { id: "SEO Agent",      label: "SEO Agent",      Icon: Hash,            desc: "Hashtags + caption" },
-  { id: "Telegram Bot",   label: "Telegram Bot",   Icon: Send,            desc: "Delivery" },
-];
 
 const ADVANCED_STAGES = [
   { id: "01-topic-validate",   label: "Validate",  Icon: CheckCircle2, desc: "Topic validation" },
@@ -121,13 +107,10 @@ const ADVANCED_STAGES = [
   { id: "06-voice-generate",   label: "Voice",     Icon: Activity,     desc: "ElevenLabs TTS" },
   { id: "07-caption-generate", label: "Captions",  Icon: Hash,         desc: "Caption generation" },
   { id: "08-scene-build",      label: "Build",     Icon: Layers,       desc: "Scene assembly" },
-  { id: "09-lipsync",          label: "Lipsync",   Icon: Video,        desc: "D-ID lipsync" },
   { id: "10-remotion-render",  label: "Render",    Icon: Film,         desc: "Remotion render" },
   { id: "11-music-mix",        label: "Music",     Icon: Music2,       desc: "Music mix" },
-  { id: "12-upscale",          label: "Upscale",   Icon: TrendingUp,   desc: "Video upscale" },
   { id: "13-export",           label: "Export",    Icon: FolderOpen,   desc: "Final export" },
   { id: "14-upload",           label: "Upload",    Icon: Share2,       desc: "Cloud upload" },
-  { id: "15-analytics",        label: "Analytics", Icon: TrendingUp,   desc: "Analytics" },
   { id: "16-publish-queue",    label: "Publish",   Icon: Send,         desc: "Telegram approval" },
 ];
 
@@ -729,7 +712,7 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     }
   };
 
-  const agents = tier === "advanced" ? ADVANCED_STAGES : PIPELINE_AGENTS;
+  const agents = ADVANCED_STAGES;
 
   const stats = {
     total:   queue.length,
@@ -2410,13 +2393,13 @@ function OwnTopicView({ onGenerate, tier = "basic" }: { onGenerate: () => void; 
 
 // ─── Advanced App ─────────────────────────────────────────────
 
-const ADV_NAV: { id: AdvSection; label: string; Icon: React.ElementType; desc: string }[] = [
-  { id: "overview",  label: "Overview",  Icon: Gauge,      desc: "System health & stats" },
-  { id: "pipelines", label: "Pipelines", Icon: Film,       desc: "Run history & stages" },
-  { id: "workers",   label: "Workers",   Icon: Server,     desc: "Fleet status" },
-  { id: "logs",      label: "Live Logs", Icon: Terminal,   desc: "Real-time log stream" },
-  { id: "costs",     label: "AI Costs",  Icon: BarChart2,  desc: "Usage & spend" },
-  { id: "queue",     label: "Queue",     Icon: Wand2,      desc: "Add & generate topics" },
+const APP_NAV: { id: AppView; label: string; Icon: React.ElementType; desc: string }[] = [
+  { id: "mission",    label: "Mission Control",   Icon: Gauge,        desc: "Active renders & system status" },
+  { id: "storyboard", label: "Storyboard Studio", Icon: PenLine,      desc: "Create & queue content" },
+  { id: "pipeline",   label: "Render Pipeline",   Icon: Film,         desc: "Run history, stages & logs" },
+  { id: "approvals",  label: "Approvals",         Icon: CheckCircle2, desc: "Review completed renders" },
+  { id: "identity",   label: "Creative Identity", Icon: Wand2,        desc: "Voice, style & persona defaults" },
+  { id: "health",     label: "System Health",     Icon: Server,       desc: "Workers, costs & infrastructure" },
 ];
 
 function StatCard({ label, value, sub, color = "#6366f1", icon: Icon }: {
@@ -2827,8 +2810,10 @@ function WorkerCard({ worker }: { worker: Worker }) {
   );
 }
 
-function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
-  const [section,           setSection]           = useState<AdvSection>("overview");
+function AdvancedApp() {
+  const [section,           setSection]           = useState<AppView>("mission");
+  const [pipeTab,           setPipeTab]           = useState<"runs" | "logs">("runs");
+  const [healthTab,         setHealthTab]         = useState<"workers" | "costs">("workers");
   const [pipelines,         setPipelines]         = useState<Pipeline[]>([]);
   const [workers,           setWorkers]           = useState<Worker[]>([]);
   const [queueStats,        setQueueStats]        = useState<QueueStats | null>(null);
@@ -3080,7 +3065,7 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
 
         {/* Nav */}
         <nav style={{ padding: "10px 8px", flex: 1 }}>
-          {ADV_NAV.map(({ id, label, Icon: NavIcon }) => {
+          {APP_NAV.map(({ id, label, Icon: NavIcon }) => {
             const active = section === id;
             return (
               <button key={id} onClick={() => setSection(id)} style={{
@@ -3097,12 +3082,12 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
                 {active && <span style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", width: 3, height: 16, borderRadius: "0 3px 3px 0", background: "linear-gradient(180deg,#6366f1,#a78bfa)" }} />}
                 <NavIcon size={14} strokeWidth={active ? 2.2 : 1.8} />
                 {label}
-                {id === "workers" && (
+                {id === "health" && (
                   <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: workerOnline ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.06)", color: workerOnline ? "#10b981" : "var(--text-muted)" }}>
                     {onlineWorkerCount}
                   </span>
                 )}
-                {id === "logs" && logs.length > 0 && (
+                {id === "pipeline" && logs.length > 0 && (
                   <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: "rgba(99,102,241,0.12)", color: "#a78bfa" }}>
                     {logs.length}
                   </span>
@@ -3137,28 +3122,20 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
           </div>
         </div>
 
-        {/* Switch to Basic */}
-        <div style={{ padding: "10px 10px 14px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-          <button onClick={onSwitchToBasic} style={{
-            width: "100%", padding: "8px 12px", borderRadius: 7,
-            border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.03)",
-            color: "var(--text-muted)", fontFamily: "inherit", fontSize: 11, fontWeight: 600,
-            cursor: "pointer", display: "flex", alignItems: "center", gap: 7, transition: "all 0.12s",
-          }}>
-            <LayoutDashboard size={12} strokeWidth={1.8} />
-            Switch to Basic
-          </button>
-          <div style={{ marginTop: 8, fontSize: 10, color: "var(--text-muted)", paddingLeft: 4 }}>
+        {/* Footer */}
+        <div style={{ padding: "10px 14px 16px", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+          <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
             <div style={{ fontWeight: 600, color: "var(--text-secondary)", fontSize: 10 }}>joseph@ottoflow.ai</div>
+            <div style={{ color: "#6366f1", fontWeight: 700, fontSize: 10, marginTop: 2 }}>ottoflow.ai</div>
           </div>
         </div>
       </aside>
 
       {/* Main content */}
-      <main style={{ flex: 1, minWidth: 0, height: "100vh", overflowY: section === "logs" ? "hidden" : "auto" }}>
+      <main style={{ flex: 1, minWidth: 0, height: "100vh", overflowY: (section === "pipeline" && pipeTab === "logs") ? "hidden" : "auto" }}>
 
-        {/* ── OVERVIEW ── */}
-        {section === "overview" && (
+        {/* ── MISSION CONTROL ── */}
+        {section === "mission" && (
           <div style={{ padding: "28px 32px" }}>
             <div style={{ marginBottom: 28 }}>
               <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", marginBottom: 4 }}>System Overview</h1>
@@ -3193,7 +3170,7 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
                   ))}
                 </div>
                 {pipelines.length > 8 && (
-                  <button onClick={() => setSection("pipelines")} style={{ marginTop: 10, fontSize: 11, color: "#6366f1", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                  <button onClick={() => setSection("pipeline")} style={{ marginTop: 10, fontSize: 11, color: "#6366f1", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
                     View all {pipelines.length} pipelines →
                   </button>
                 )}
@@ -3226,7 +3203,7 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
                   })}
                   <div ref={logEndRef} />
                 </div>
-                <button onClick={() => setSection("logs")} style={{ marginTop: 8, fontSize: 11, color: "#6366f1", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, textAlign: "left" }}>
+                <button onClick={() => { setSection("pipeline"); setPipeTab("logs"); }} style={{ marginTop: 8, fontSize: 11, color: "#6366f1", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, textAlign: "left" }}>
                   Open full log terminal →
                 </button>
               </div>
@@ -3245,7 +3222,7 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
                   {workers.slice(0, 4).map(w => <WorkerCard key={w.id} worker={w} />)}
                   {workers.length > 4 && (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <button onClick={() => setSection("workers")} style={{ fontSize: 11, color: "#6366f1", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                      <button onClick={() => setSection("health")} style={{ fontSize: 11, color: "#6366f1", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
                         +{workers.length - 4} more workers →
                       </button>
                     </div>
@@ -3256,8 +3233,25 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
           </div>
         )}
 
-        {/* ── PIPELINES ── */}
-        {section === "pipelines" && (
+        {/* ── PIPELINE — TAB BAR ── */}
+        {section === "pipeline" && (
+          <div style={{ padding: "12px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.05)", flexShrink: 0 }}>
+            {(["runs", "logs"] as const).map(t => (
+              <button key={t} onClick={() => setPipeTab(t)} style={{
+                padding: "7px 16px", border: "none", cursor: "pointer",
+                fontFamily: "inherit", fontSize: 12, fontWeight: 600, background: "transparent",
+                color: pipeTab === t ? "#a78bfa" : "var(--text-muted)",
+                borderBottom: pipeTab === t ? "2px solid #6366f1" : "2px solid transparent",
+                transition: "all 0.12s", marginBottom: -1,
+              }}>
+                {t === "runs" ? "Pipeline Runs" : "Live Logs"}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ── RENDER PIPELINE — RUNS ── */}
+        {section === "pipeline" && pipeTab === "runs" && (
           <div style={{ padding: "28px 32px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
               <div>
@@ -3315,8 +3309,25 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
           </div>
         )}
 
-        {/* ── WORKERS ── */}
-        {section === "workers" && (
+        {/* ── HEALTH — TAB BAR ── */}
+        {section === "health" && (
+          <div style={{ padding: "12px 32px 0", display: "flex", gap: 4, borderBottom: "1px solid rgba(255,255,255,0.05)", flexShrink: 0 }}>
+            {(["workers", "costs"] as const).map(t => (
+              <button key={t} onClick={() => setHealthTab(t)} style={{
+                padding: "7px 16px", border: "none", cursor: "pointer",
+                fontFamily: "inherit", fontSize: 12, fontWeight: 600, background: "transparent",
+                color: healthTab === t ? "#a78bfa" : "var(--text-muted)",
+                borderBottom: healthTab === t ? "2px solid #6366f1" : "2px solid transparent",
+                transition: "all 0.12s", marginBottom: -1,
+              }}>
+                {t === "workers" ? "Worker Fleet" : "AI Costs"}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* ── HEALTH — WORKERS ── */}
+        {section === "health" && healthTab === "workers" && (
           <div style={{ padding: "28px 32px" }}>
             <div style={{ marginBottom: 24 }}>
               <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", marginBottom: 4 }}>Worker Fleet</h1>
@@ -3338,8 +3349,8 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
           </div>
         )}
 
-        {/* ── LOGS ── */}
-        {section === "logs" && (
+        {/* ── RENDER PIPELINE — LOGS ── */}
+        {section === "pipeline" && pipeTab === "logs" && (
           <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden" }}>
             {/* Log toolbar */}
             <div style={{ padding: "14px 24px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "#0b0b18", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
@@ -3405,8 +3416,8 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
           </div>
         )}
 
-        {/* ── COSTS ── */}
-        {section === "costs" && (
+        {/* ── HEALTH — COSTS ── */}
+        {section === "health" && healthTab === "costs" && (
           <div style={{ padding: "28px 32px" }}>
             <div style={{ marginBottom: 28 }}>
               <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", marginBottom: 4 }}>AI Cost Analytics</h1>
@@ -3447,10 +3458,40 @@ function AdvancedApp({ onSwitchToBasic }: { onSwitchToBasic: () => void }) {
           </div>
         )}
 
-        {/* ── QUEUE ── */}
-        {section === "queue" && (
+        {/* ── STORYBOARD STUDIO ── */}
+        {section === "storyboard" && (
           <div style={{ maxWidth: 680, margin: "0 auto" }}>
-            <OwnTopicView onGenerate={() => { setSection("pipelines"); fetchPipelines(); }} tier="advanced" />
+            <OwnTopicView onGenerate={() => { setSection("pipeline"); fetchPipelines(); }} tier="advanced" />
+          </div>
+        )}
+
+        {/* ── APPROVALS ── */}
+        {section === "approvals" && (
+          <div style={{ padding: "28px 32px" }}>
+            <div style={{ marginBottom: 28 }}>
+              <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", marginBottom: 4 }}>Approvals</h1>
+              <p style={{ fontSize: 12, color: "var(--text-muted)" }}>Review completed renders before distribution</p>
+            </div>
+            <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "64px", textAlign: "center", color: "var(--text-muted)" }}>
+              <CheckCircle2 size={32} style={{ opacity: 0.12, display: "block", margin: "0 auto 14px" }} />
+              <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14, color: "var(--text-secondary)" }}>Phase 5 — Coming Soon</div>
+              <div style={{ fontSize: 12 }}>Approve or reject renders before Telegram delivery</div>
+            </div>
+          </div>
+        )}
+
+        {/* ── CREATIVE IDENTITY ── */}
+        {section === "identity" && (
+          <div style={{ padding: "28px 32px" }}>
+            <div style={{ marginBottom: 28 }}>
+              <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5, color: "var(--text)", marginBottom: 4 }}>Creative Identity</h1>
+              <p style={{ fontSize: 12, color: "var(--text-muted)" }}>Persistent voice, style, and persona defaults for all renders</p>
+            </div>
+            <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "64px", textAlign: "center", color: "var(--text-muted)" }}>
+              <Wand2 size={32} style={{ opacity: 0.12, display: "block", margin: "0 auto 14px" }} />
+              <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14, color: "var(--text-secondary)" }}>Phase 6 — Coming Soon</div>
+              <div style={{ fontSize: 12 }}>Configure creator persona, voice presets, caption style, and visual identity defaults</div>
+            </div>
           </div>
         )}
 
@@ -3717,24 +3758,10 @@ function BasicApp({ onSwitchToAdvanced }: { onSwitchToAdvanced: () => void }) {
 // ─── Root ─────────────────────────────────────────────────────
 
 export default function App() {
-  const [appTier, setAppTier] = useState<Tier>("basic");
-
-  // Persist tier preference across sessions
-  useEffect(() => {
-    const saved = localStorage.getItem("ott-tier") as Tier | null;
-    if (saved === "advanced" || saved === "basic") setAppTier(saved);
-  }, []);
-
-  const switchToAdvanced = () => { setAppTier("advanced"); localStorage.setItem("ott-tier", "advanced"); };
-  const switchToBasic    = () => { setAppTier("basic");    localStorage.setItem("ott-tier", "basic"); };
-
   return (
     <>
       <Toaster position="bottom-right" toastOptions={{ style: { background: "var(--bg-card)", border: "1px solid var(--border-strong)", color: "var(--text)", fontFamily: "inherit", fontSize: 13 } }} richColors />
-      {appTier === "advanced"
-        ? <AdvancedApp onSwitchToBasic={switchToBasic} />
-        : <BasicApp onSwitchToAdvanced={switchToAdvanced} />
-      }
+      <AdvancedApp />
     </>
   );
 }
