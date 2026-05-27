@@ -56,7 +56,7 @@ export class Imagen3Agent {
         const asStr = JSON.stringify(err);
         if (asStr !== "{}") detail = asStr;
       } catch { /* non-serialisable */ }
-      console.error(`[imagen3] generateSingleImage FAILED — model=gemini-2.0-flash-preview-image-generation path=${path.basename(outPath)}`);
+      console.error(`[imagen3] generateSingleImage FAILED — model=gemini-2.0-flash-exp path=${path.basename(outPath)}`);
       console.error(`[imagen3] error.message: ${msg}`);
       if (detail !== msg) console.error(`[imagen3] error.detail: ${detail.slice(0, 1000)}`);
       return null;
@@ -113,7 +113,7 @@ export class Imagen3Agent {
    */
   private async generateImageBytes(prompt: string): Promise<Buffer> {
     const response = await this.ai!.models.generateContent({
-      model:    "gemini-2.0-flash-preview-image-generation",
+      model:    "gemini-2.0-flash-exp",
       contents: this.enhancePrompt(prompt),
       config:   { responseModalities: ["IMAGE"] },
     });

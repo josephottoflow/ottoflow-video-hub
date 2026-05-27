@@ -186,6 +186,7 @@ export class PipelineOrchestratorV2 {
 
       const localPort = process.env.PORT || "3000";
       if (VeoAgent.isAvailable()) {
+        this.veo.resetQuota(); // fresh attempt — clears any quota flag from a prior job on this instance
         emitLog("V2-Orchestrator", `Generating ${sb.scenes.length} Veo clips (serialized — avoids burst 429)...`, "info");
         TRACE(`Veo: model=veo-3.1-lite-generate-preview scenes=${sb.scenes.length} GOOGLE_API_KEY=${process.env.GOOGLE_API_KEY ? process.env.GOOGLE_API_KEY.slice(0,8)+"..." : "MISSING"}`);
         _t = Date.now();

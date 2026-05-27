@@ -39,6 +39,8 @@ const TEXT_SCENE_DURATIONS: Array<{ beat: "hook" | "insight" | "cta"; durationS:
 
 export class VeoAgent {
   private ai: GoogleGenAI | null;
+  // Set to true after a 429 quota error — stops burning time on subsequent clips
+  private quotaExhausted = false;
 
   constructor() {
     const apiKey = process.env.GOOGLE_API_KEY;
@@ -49,9 +51,15 @@ export class VeoAgent {
     return !!process.env.GOOGLE_API_KEY;
   }
 
+  /** Reset quota flag — call at the start of each job so a new job gets a fresh attempt. */
+  resetQuota(): void {
+    this.quotaExhausted = false;
+  }
+
   /**
    * Generate a single clip from a text prompt. Returns the output path on success, null on failure.
-   * durationS is clamped to [4, 8] by the caller (Veo API constraint).
+   * If a 429 quota error is seen, sets quotaExhausted=true so subsequent clips are skipped
+   * immediately rather than wasting 5s per clip on guaranteed failures.
    */
   async generateSingleClip(
     prompt:    string,
@@ -60,6 +68,10 @@ export class VeoAgent {
   ): Promise<string | null> {
     if (!this.ai) {
       console.warn("[veo] GOOGLE_API_KEY not set — skipping clip generation");
+      return null;
+    }
+    if (this.quotaExhausted) {
+      console.warn(`[veo] Quota exhausted — skipping ${path.basename(outPath)} (fast-fail)`);
       return null;
     }
     if (fs.existsSync(outPath)) {
@@ -75,12 +87,16 @@ export class VeoAgent {
       return await this.generateFromText(prompt, outPath, safeDuration);
     } catch (err) {
       const msg   = err instanceof Error ? err.message : String(err);
-      // Capture full error object for API errors (quota, model access, etc.)
       let detail  = msg;
       try {
         const asStr = JSON.stringify(err);
         if (asStr !== "{}") detail = asStr;
       } catch { /* non-serialisable */ }
+      // 429 = daily/project quota exhausted — flag it so remaining clips fast-fail
+      if (msg.includes("429") || detail.includes("429") || detail.includes("RESOURCE_EXHAUSTED")) {
+        this.quotaExhausted = true;
+        console.error(`[veo] QUOTA EXHAUSTED — remaining clips will be skipped. Reset at next daily quota cycle.`);
+      }
       console.error(`[veo] generateSingleClip FAILED — model=${VEO_MODEL} duration=${safeDuration}s path=${path.basename(outPath)}`);
       console.error(`[veo] error.message: ${msg}`);
       if (detail !== msg) console.error(`[veo] error.detail: ${detail.slice(0, 1000)}`);
