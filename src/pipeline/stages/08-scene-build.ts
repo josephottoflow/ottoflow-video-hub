@@ -24,6 +24,18 @@ export async function sceneBuild(ctx: PipelineContext): Promise<StageResult> {
   const bgColor      = ctx.artifacts["background_color"]       ?? "#0a0a0a";
   const captions     = ctx.artifacts["captions"]     ?? "[]";
 
+  // Style → brand colors mapping (matches design-agent.ts defaults)
+  const STYLE_COLORS: Record<string, { primary: string; secondary: string; accent: string; background: string; text: string }> = {
+    "motivational":    { primary: "#dc2626", secondary: "#991b1b", accent: "#f87171",  background: "#0a0a0a", text: "#ffffff" },
+    "case study":      { primary: "#0891b2", secondary: "#0e7490", accent: "#22d3ee",  background: "#080c10", text: "#e2f8ff" },
+    "lifestyle":       { primary: "#059669", secondary: "#047857", accent: "#34d399",  background: "#0a0f0a", text: "#ffffff" },
+    "startup-focused": { primary: "#7c3aed", secondary: "#6d28d9", accent: "#a78bfa",  background: "#08050f", text: "#f5f0ff" },
+    "luxury":          { primary: "#d97706", secondary: "#92400e", accent: "#f59e0b",  background: "#06040a", text: "#fff8e7" },
+    "neon":            { primary: "#ec4899", secondary: "#be185d", accent: "#f0abfc",  background: "#05000f", text: "#ffffff" },
+  };
+  const defaultColors = { primary: "#6366f1", secondary: "#4f46e5", accent: "#818cf8", background: "#0a0a0a", text: "#ffffff" };
+  const brandColors = STYLE_COLORS[ctx.style?.toLowerCase() ?? ""] ?? defaultColors;
+
   const sceneData = {
     template,
     topic:    ctx.topic,
@@ -31,6 +43,7 @@ export async function sceneBuild(ctx: PipelineContext): Promise<StageResult> {
     script,
     hookText,
     voicePath,
+    brandColors,
     backgrounds: {
       videoUrl:  bgVideoUrl  || undefined,
       imageUrl:  bgImageUrl  || undefined,
