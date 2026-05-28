@@ -22,13 +22,20 @@ export class GeminiProvider implements AIProvider {
       contents: userPrompt,
       config: {
         ...(systemPrompt ? { systemInstruction: systemPrompt } : {}),
-        maxOutputTokens:  opts.maxTokens,
-        temperature:      opts.temperature,
-        ...(opts.json ? { responseMimeType: "application/json" } : {}),
+        maxOutputTokens: opts.maxTokens,
+        temperature:     opts.temperature,
+        // responseMimeType:"application/json" causes response truncation in some
+        // regions/quotas. We rely on prompt instructions + post-processing instead.
       },
     });
 
-    const text = (response.text ?? "").trim();
+    // Join all text parts — response.text only returns the first part in some SDK versions
+    const rawText = response.candidates?.[0]?.content?.parts
+      ?.filter((p: { text?: string }) => p.text)
+      .map((p: { text?: string }) => p.text!)
+      .join("") ?? response.text ?? "";
+
+    const text = rawText.trim();
 
     // usageMetadata may be undefined on some Gemini models — fall back to char-based estimate
     const inputTokens  = response.usageMetadata?.promptTokenCount     ?? Math.ceil((userPrompt + (systemPrompt ?? "")).length / 4);

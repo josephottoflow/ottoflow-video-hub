@@ -1,5 +1,29 @@
 import { GeminiProvider } from "./providers/gemini";
 import { ClaudeProvider } from "./providers/claude";
+
+/** Extract parseable JSON from an AI response that may contain preamble/markdown */
+function extractJSON(raw: string): string | null {
+  if (!raw) return null;
+  // 1. Strip markdown fences
+  const stripped = raw.replace(/^```json?\n?/m, "").replace(/\n?```$/m, "").trim();
+  // 2. Try direct parse
+  try { JSON.parse(stripped); return stripped; } catch { /* fall through */ }
+  // 3. Find first { ... last } substring
+  const start = stripped.indexOf("{");
+  const end   = stripped.lastIndexOf("}");
+  if (start !== -1 && end > start) {
+    const candidate = stripped.slice(start, end + 1);
+    try { JSON.parse(candidate); return candidate; } catch { /* fall through */ }
+  }
+  // 4. Find first [ ... last ] substring (array responses)
+  const aStart = stripped.indexOf("[");
+  const aEnd   = stripped.lastIndexOf("]");
+  if (aStart !== -1 && aEnd > aStart) {
+    const candidate = stripped.slice(aStart, aEnd + 1);
+    try { JSON.parse(candidate); return candidate; } catch { /* fall through */ }
+  }
+  return null;
+}
 import { resolveRoute, getCostUsd, FALLBACK_CHAINS, FALLBACK_MODEL_FOR_PROVIDER } from "./router";
 import { buildCacheKey, getCached, setCached } from "./cache";
 import { trackRequest } from "./cost-tracker";
@@ -77,18 +101,21 @@ export class AIOrchestrator {
         });
 
         // When JSON format is requested, validate the response is parseable before
-        // treating it as a success. A truncated/invalid JSON response from Gemini
-        // should fail here so the next provider in the chain (Claude) can handle it.
-        if (req.responseFormat === "json" && result.text) {
-          const cleaned = result.text.replace(/^```json?\n?/, "").replace(/\n?```$/, "").trim();
-          try {
-            JSON.parse(cleaned);
-          } catch {
-            const preview = cleaned.slice(0, 120);
-            console.warn(`[ai-orchestrator] ${providerName}/${model} returned invalid JSON (len=${cleaned.length} preview=${JSON.stringify(preview)}) — trying next provider`);
-            lastError = new Error(`Invalid JSON response from ${providerName}: ${(cleaned || "(empty)").slice(0, 80)}`);
+        // treating it as a success. Applies multi-stage extraction to handle:
+        //   1. Raw JSON (ideal)
+        //   2. Markdown code fences (```json ... ```)
+        //   3. Preamble text before the JSON object
+        //   4. Truncated responses — fail fast so next provider handles it
+        if (req.responseFormat === "json" && result.text !== undefined) {
+          const extracted = extractJSON(result.text);
+          if (extracted === null) {
+            const preview = result.text.slice(0, 120);
+            console.warn(`[ai-orchestrator] ${providerName}/${model} returned invalid JSON (len=${result.text.length} preview=${JSON.stringify(preview)}) — trying next provider`);
+            lastError = new Error(`Invalid JSON from ${providerName}: ${(result.text || "(empty)").slice(0, 80)}`);
             continue;
           }
+          // Replace the text with the clean extracted JSON so downstream parsing works
+          result.text = extracted;
         }
 
         const latencyMs  = Date.now() - t0;
