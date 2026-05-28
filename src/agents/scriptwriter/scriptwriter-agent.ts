@@ -191,20 +191,26 @@ Structural rules:
       responseFormat: "json",
     });
 
-    const raw  = aiResponse.text.replace(/^```json?\n?/, "").replace(/\n?```$/, "");
-    const data = JSON.parse(raw);
+    const raw = aiResponse.text.replace(/^```json?\n?/, "").replace(/\n?```$/, "");
+    let data: Record<string, unknown>;
+    try {
+      data = JSON.parse(raw);
+    } catch (parseErr) {
+      console.error(`[scriptwriter] JSON parse failed — provider:${aiResponse.provider} model:${aiResponse.model} rawLen:${raw.length} raw:${JSON.stringify(raw.slice(0, 300))}`);
+      throw parseErr;
+    }
 
-    const script = humanize(data.script || "");
-    const hookA  = humanize(data.hookA  || data.hook_a || "");
-    const hookB  = humanize(data.hookB  || data.hook_b || "");
-    const hookC  = humanize(data.hookC  || data.hook_c || "");
+    const script = humanize(data.script as string || "");
+    const hookA  = humanize((data.hookA  || data.hook_a) as string || "");
+    const hookB  = humanize((data.hookB  || data.hook_b) as string || "");
+    const hookC  = humanize((data.hookC  || data.hook_c) as string || "");
 
     return {
       script,
       hookA,
       hookB,
       hookC,
-      wordCount: data.wordCount || data.word_count || script.split(/\s+/).length || 0,
+      wordCount: Number(data.wordCount ?? data.word_count ?? 0) || script.split(/\s+/).length,
     };
   }
 
