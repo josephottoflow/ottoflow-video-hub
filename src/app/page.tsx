@@ -1172,7 +1172,6 @@ function AdvancedApp() {
   const [workers,           setWorkers]           = useState<Worker[]>([]);
   const [queueStats,        setQueueStats]        = useState<QueueStats | null>(null);
   const [aiCosts,           setAiCosts]           = useState<AICosts | null>(null);
-  const [queue,             setQueue]             = useState<QueueRow[]>([]);
   const [activePipelineId,  setActivePipelineId]  = useState<string | null>(null);
   const [stageStatuses,     setStageStatuses]     = useState<Record<string, string>>({});
   const [logs,              setLogs]              = useState<LogEntry[]>([]);
@@ -1280,12 +1279,6 @@ function AdvancedApp() {
     load(); const t = setInterval(load, 60_000); return () => clearInterval(t);
   }, []);
 
-  // Fetch sheet queue (8s)
-  const fetchQueue = useCallback(async () => {
-    const r = await fetch("/api/queue").catch(() => null);
-    if (r?.ok) { const d = await r.json(); setQueue(d.rows || []); }
-  }, []);
-  useEffect(() => { fetchQueue(); const t = setInterval(fetchQueue, 8_000); return () => clearInterval(t); }, [fetchQueue]);
 
   // Fetch workers (8s)
   useEffect(() => {
@@ -1330,40 +1323,6 @@ function AdvancedApp() {
     load(); const t = setInterval(load, 10_000); return () => clearInterval(t);
   }, []);
 
-  const renderRow = async (row: QueueRow) => {
-    const tid = `adv-${row.rowIndex}`;
-    toast.loading(`Queuing: ${displayTopic(row.topic)}`, { id: tid });
-    const res = await fetch("/api/advanced/pipeline", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic: row.topic, style: row.style, rowIndex: row.rowIndex }),
-    }).catch(() => null);
-    if (res?.ok) {
-      const d = await res.json() as { pipelineId: string };
-      setActivePipelineId(d.pipelineId);
-      setStageStatuses({});
-      toast.success(`Queued: ${displayTopic(row.topic)}`, { id: tid });
-      fetchPipelines();
-    } else {
-      toast.error(`Failed: ${displayTopic(row.topic)}`, { id: tid });
-    }
-  };
-
-  const runQueue = async () => {
-    const pending = queue.filter(r => ["Pending", "Queued"].includes(r.status));
-    if (pending.length === 0) { toast.error("No pending rows in queue"); return; }
-    let first: string | null = null;
-    for (const row of pending) {
-      const res = await fetch("/api/advanced/pipeline", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: row.topic, style: row.style, rowIndex: row.rowIndex }),
-      }).catch(() => null);
-      if (res?.ok) {
-        const d = await res.json() as { pipelineId: string };
-        if (!first) { first = d.pipelineId; setActivePipelineId(d.pipelineId); setStageStatuses({}); }
-      }
-    }
-    if (first) { toast.success(`${pending.length} job(s) queued`); fetchPipelines(); }
-  };
 
   // ── Computed stats ──
   const dbStats  = queueStats?.db;
@@ -1501,6 +1460,14 @@ function AdvancedApp() {
         {/* ── MISSION CONTROL ── */}
         {section === "mission" && (
           <div style={{ padding: "28px 32px" }}>
+
+            {/* Worker offline alert */}
+            {onlineWorkerCount === 0 && workers !== null && (
+              <div style={{ marginBottom: 20, padding: "10px 16px", borderRadius: 10, background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)", display: "flex", alignItems: "center", gap: 10 }}>
+                <AlertCircle size={14} color="#f59e0b" strokeWidth={2} style={{ flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: "#f59e0b", fontWeight: 600 }}>Railway worker offline — renders paused. Start the worker service on Railway to resume.</span>
+              </div>
+            )}
 
             {/* Header + quick-queue CTA */}
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 28 }}>

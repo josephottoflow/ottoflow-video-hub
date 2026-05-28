@@ -20,3 +20,11 @@ public/content/*/
 .mcp.json
 .claude/
 .vercel
+.env*
+scripts/redesign-advanced-sheet.mjs
+scripts/probe-railway-redis.mjs
+scripts/test-v2-render.mjs
+validation-output.txt
+validation-report-*.json
+skills-lock.json
+.agents/
