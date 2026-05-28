@@ -76,6 +76,21 @@ export class AIOrchestrator {
           json:        req.responseFormat === "json",
         });
 
+        // When JSON format is requested, validate the response is parseable before
+        // treating it as a success. A truncated/invalid JSON response from Gemini
+        // should fail here so the next provider in the chain (Claude) can handle it.
+        if (req.responseFormat === "json" && result.text) {
+          const cleaned = result.text.replace(/^```json?\n?/, "").replace(/\n?```$/, "").trim();
+          try {
+            JSON.parse(cleaned);
+          } catch {
+            const preview = cleaned.slice(0, 120);
+            console.warn(`[ai-orchestrator] ${providerName}/${model} returned invalid JSON (len=${cleaned.length} preview=${JSON.stringify(preview)}) — trying next provider`);
+            lastError = new Error(`Invalid JSON response from ${providerName}: ${(cleaned || "(empty)").slice(0, 80)}`);
+            continue;
+          }
+        }
+
         const latencyMs  = Date.now() - t0;
         const costUsd    = getCostUsd(model, result.inputTokens, result.outputTokens);
 

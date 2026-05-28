@@ -14,13 +14,16 @@
 import IORedis, { type RedisOptions } from "ioredis";
 
 const UPSTASH_OPTS: RedisOptions = {
-  maxRetriesPerRequest: null,
+  maxRetriesPerRequest: 3,              // fail fast — Upstash is pub/sub only, not BullMQ
   lazyConnect:          true,
   enableReadyCheck:     false,
   keepAlive:            10_000,
-  connectTimeout:       10_000,
-  commandTimeout:       15_000,
-  retryStrategy:        (t) => Math.min(t * 500, 5_000),
+  connectTimeout:       8_000,
+  commandTimeout:       8_000,
+  retryStrategy:        (t) => {
+    if (t > 3) return null;            // stop reconnecting after 3 attempts
+    return Math.min(t * 1_000, 5_000);
+  },
 };
 
 let _redis: IORedis | null = null;
