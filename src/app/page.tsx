@@ -4,16 +4,14 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Toaster, toast } from "sonner";
 import {
-  LayoutDashboard, List, Bot, Star, Share2,
-  Play, RefreshCw, Loader2, ChevronRight, Plus,
+  List, Star, Share2, Play, RefreshCw, Loader2,
   CheckCircle2, XCircle, Zap, Music2,
-  Film, Send, FileSpreadsheet, Wand2, Clapperboard,
-  Image, Tag, Video, Terminal, Eye, FolderOpen,
+  Film, Send, Wand2, Clapperboard,
+  Image, Video, Terminal, Eye, FolderOpen,
   Activity, TrendingUp, Layers, Hash, PenLine,
   Server, Database, Search, AlertCircle, Clock,
-  BarChart2, ChevronDown, ChevronUp, Cpu, Globe,
-  ArrowUpRight, Wifi, Filter, DollarSign, Package,
-  Gauge, X, Power,
+  BarChart2, ChevronDown, ChevronUp,
+  DollarSign, Package, Gauge, X,
 } from "lucide-react";
 
 
@@ -1253,11 +1251,17 @@ function AdvancedApp() {
     return () => { es?.close(); clearTimeout(reconnectTimer); };
   }, [activePipelineId]);
 
-  // Fetch pipelines (10s)
+  // Fetch pipelines (10s) — auto-wire activePipelineId to most recent running pipeline
   const fetchPipelines = useCallback(async () => {
     const statusParam = pipeFilter !== "all" ? `&status=${pipeFilter}` : "";
     const r = await fetch(`/api/advanced/pipelines?limit=25${statusParam}`).catch(() => null);
-    if (r?.ok) { const d = await r.json(); setPipelines(d.pipelines || []); }
+    if (r?.ok) {
+      const d = await r.json();
+      const list: Pipeline[] = d.pipelines || [];
+      setPipelines(list);
+      const running = list.find(p => p.status === "running" || p.status === "queued");
+      if (running) setActivePipelineId(prev => prev ?? running.id);
+    }
   }, [pipeFilter]);
   useEffect(() => { fetchPipelines(); const t = setInterval(fetchPipelines, 10_000); return () => clearInterval(t); }, [fetchPipelines]);
 
@@ -1368,22 +1372,31 @@ function AdvancedApp() {
             </div>
           </div>
 
-          {/* Pipeline status pill */}
-          <div style={{
-            display: "flex", alignItems: "center", gap: 7, padding: "6px 10px", borderRadius: 8,
-            background: pipeStatus === "running" ? "rgba(99,102,241,0.1)" : "rgba(255,255,255,0.03)",
-            border: `1px solid ${pipeStatus === "running" ? "rgba(99,102,241,0.3)" : "rgba(255,255,255,0.06)"}`,
-          }}>
-            <span style={{
-              width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-              background: pipeStatus === "running" ? "#10b981" : pipeStatus === "done" ? "#10b981" : pipeStatus === "error" ? "#f43f5e" : "rgba(255,255,255,0.15)",
-              boxShadow: pipeStatus === "running" ? "0 0 6px #10b981" : "none",
-              animation: pipeStatus === "running" ? "pulse 1.5s infinite" : "none",
-            }} />
-            <span style={{ fontSize: 10, fontWeight: 600, color: pipeStatus === "running" ? "#a78bfa" : "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {pipeStatus === "running" ? "Pipeline running" : pipeStatus === "done" ? "Pipeline done" : pipeStatus === "error" ? "Error" : "Idle"}
-            </span>
-          </div>
+          {/* Pipeline status pill — derived from polled DB state */}
+          {(() => {
+            const runningPipeline = pipelines.find(p => p.status === "running");
+            const isRunning = !!runningPipeline;
+            const queuedCount = pipelines.filter(p => p.status === "queued" || p.status === "pending").length;
+            return (
+              <div style={{
+                display: "flex", alignItems: "center", gap: 7, padding: "6px 10px", borderRadius: 8,
+                background: isRunning ? "rgba(99,102,241,0.1)" : "rgba(255,255,255,0.03)",
+                border: `1px solid ${isRunning ? "rgba(99,102,241,0.3)" : "rgba(255,255,255,0.06)"}`,
+              }}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                  background: isRunning ? "#10b981" : queuedCount > 0 ? "#f59e0b" : "rgba(255,255,255,0.15)",
+                  boxShadow: isRunning ? "0 0 6px #10b981" : "none",
+                  animation: isRunning ? "pulse 1.5s infinite" : "none",
+                }} />
+                <span style={{ fontSize: 10, fontWeight: 600, color: isRunning ? "#a78bfa" : "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {isRunning
+                    ? `${runningPipeline.progress_pct}% · ${runningPipeline.current_stage?.replace(/^\d+-/, "") ?? "running"}`
+                    : queuedCount > 0 ? `${queuedCount} queued` : "Idle"}
+                </span>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Nav */}
@@ -1406,15 +1419,34 @@ function AdvancedApp() {
                 <NavIcon size={14} strokeWidth={active ? 2.2 : 1.8} />
                 {label}
                 {id === "health" && (
-                  <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: workerOnline ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.06)", color: workerOnline ? "#10b981" : "var(--text-muted)" }}>
-                    {onlineWorkerCount}
+                  <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: workerOnline ? "rgba(16,185,129,0.15)" : "rgba(244,63,94,0.12)", color: workerOnline ? "#10b981" : "#f43f5e" }}>
+                    {workerOnline ? onlineWorkerCount : "!"}
                   </span>
                 )}
-                {id === "pipeline" && logs.length > 0 && (
-                  <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: "rgba(99,102,241,0.12)", color: "#a78bfa" }}>
-                    {logs.length}
-                  </span>
-                )}
+                {id === "pipeline" && (() => {
+                  const running = pipelines.filter(p => p.status === "running").length;
+                  const queued = pipelines.filter(p => p.status === "queued").length;
+                  if (running > 0) return (
+                    <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: "rgba(99,102,241,0.15)", color: "#a78bfa", animation: "pulse 1.5s infinite" }}>
+                      {running} live
+                    </span>
+                  );
+                  if (queued > 0) return (
+                    <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: "rgba(245,158,11,0.12)", color: "#f59e0b" }}>
+                      {queued}
+                    </span>
+                  );
+                  return null;
+                })()}
+                {id === "approvals" && (() => {
+                  const pending = dbJobs.filter(j => j.status === "done").length;
+                  if (pending === 0) return null;
+                  return (
+                    <span style={{ marginLeft: "auto", fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: "rgba(16,185,129,0.12)", color: "#10b981" }}>
+                      {pending}
+                    </span>
+                  );
+                })()}
               </button>
             );
           })}
@@ -1794,7 +1826,7 @@ function AdvancedApp() {
 
         {/* ── STORYBOARD STUDIO ── */}
         {section === "storyboard" && (
-          <OwnTopicView onGenerate={() => { setSection("pipeline"); fetchPipelines(); }} tier="advanced" />
+          <OwnTopicView onGenerate={() => { fetchPipelines(); }} tier="advanced" />
         )}
 
         {/* ── APPROVALS ── */}
