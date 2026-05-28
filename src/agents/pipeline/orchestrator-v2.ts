@@ -247,8 +247,10 @@ export class PipelineOrchestratorV2 {
       setStatus("running", row.topic, 28);
 
       // ── Step 3: Veo clips — one per storyboard scene ──────────────────────
-      const clipUrlMap: Record<string, string> = {};
+      const clipUrlMap: Record<string, string>  = {};
       const imageUrlMap: Record<string, string> = {};
+      const veoFailureReasons: Record<string, string> = {};
+      const imgFailureReasons: Record<string, string> = {};
 
       if (VeoAgent.isAvailable()) {
         this.veo.resetQuota();
@@ -284,10 +286,12 @@ export class PipelineOrchestratorV2 {
               emitLog("V2-Orchestrator", `Veo clip ${i+1}/${sb.scenes.length} ✅ — ${scene.beat} (${veoDur}s, ${clipSizeMb}MB)`, "success");
               TRACE(`Veo[${i+1}] SUCCESS: bytes=${clipSizeBytes} sizeMb=${clipSizeMb} url=${clipUrl}`);
             } else {
+              veoFailureReasons[scene.id] = "R2 upload failed";
               console.error(`[v2] Veo clip ${scene.id} generated (${clipSizeMb}MB) but R2 storage failed — scene falls through to Imagen3`);
               emitLog("V2-Orchestrator", `Veo clip ${i+1}/${sb.scenes.length} generated but R2 upload failed → Imagen3 fallback`, "warning");
             }
           } else {
+            veoFailureReasons[scene.id] = "Veo generation failed";
             console.error(`[v2] Veo FAILED scene=${scene.id} beat=${scene.beat} — will use Imagen3 fallback`);
             emitLog("V2-Orchestrator", `Veo scene ${scene.id} ❌ — will use Imagen3 fallback`, "warning");
             TRACE_ERR(`Veo[${i+1}] FAILED: scene=${scene.id} beat=${scene.beat}`);
@@ -300,6 +304,7 @@ export class PipelineOrchestratorV2 {
         await this.sheets.updateStageStatus(rowIndex, "veo", veoStored > 0 ? "Done" : "Error");
       } else {
         console.log(`[v2] Veo SKIPPED — GOOGLE_API_KEY not set. All scenes will use Imagen3 fallback.`);
+        sb.scenes.forEach(s => { veoFailureReasons[s.id] = "Veo API not configured"; });
         await this.sheets.updateStageStatus(rowIndex, "veo", "Skipped");
       }
 
@@ -332,14 +337,17 @@ export class PipelineOrchestratorV2 {
                 console.log(`[v2] Imagen3 scene ${scene.id} stored → ${imgUrl.slice(-70)} (${imgSizeKb}KB)`);
                 TRACE(`Imagen3: SUCCESS scene=${scene.id} ${imgSizeKb}KB → ${imgUrl}`);
               } else {
+                imgFailureReasons[scene.id] = "R2 upload failed";
                 console.error(`[v2] Imagen3 scene ${scene.id} generated (${imgSizeKb}KB) but R2 storage failed — scene will render procedural background`);
               }
             } else {
+              imgFailureReasons[scene.id] = "Imagen3 returned no image";
               console.error(`[v2] Imagen3: scene=${scene.id} returned null — scene will render procedural background`);
               TRACE_ERR(`Imagen3: scene=${scene.id} returned null — scene will render with gradient background only`);
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
+            imgFailureReasons[scene.id] = `Imagen3 error: ${msg.slice(0, 60)}`;
             console.error(`[v2] Imagen3 EXCEPTION scene=${scene.id}: ${msg}`);
             emitLog("V2-Orchestrator", `⚠️ Imagen3 failed for ${scene.id} — scene will use gradient background`, "warning");
           }
@@ -417,7 +425,15 @@ export class PipelineOrchestratorV2 {
         const source: SceneManifestEntry["source"] = clip ? "veo" : img ? "imagen3" : "procedural";
         const src  = clip ? `VEO:${clip.slice(-40)}` : img ? `IMG:${img.slice(-40)}` : "PROCEDURAL (dark gradient)";
         console.log(`  scene${i+1} [${scene.beat}] → ${src}`);
-        return { id: scene.id, beat: scene.beat, source, url: clip || img || undefined };
+        // fallbackReason: explain why the primary source wasn't used
+        let fallbackReason: string | undefined;
+        if (!clip) {
+          fallbackReason = veoFailureReasons[scene.id]; // why Veo didn't produce a clip
+          if (!img && imgFailureReasons[scene.id]) {
+            fallbackReason = [fallbackReason, imgFailureReasons[scene.id]].filter(Boolean).join("; ");
+          }
+        }
+        return { id: scene.id, beat: scene.beat, source, url: clip || img || undefined, fallbackReason };
       });
       if (dbJobId) updateJobManifest(dbJobId, assetManifest).catch(() => {});
 

@@ -54,10 +54,11 @@ export interface DbJob {
 }
 
 export interface SceneManifestEntry {
-  id:     string;
-  beat:   string;
-  source: "veo" | "imagen3" | "procedural";
-  url?:   string;
+  id:             string;
+  beat:           string;
+  source:         "veo" | "imagen3" | "procedural";
+  url?:           string;
+  fallbackReason?: string;
 }
 
 export interface DbContentRow {
