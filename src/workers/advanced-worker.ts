@@ -153,15 +153,49 @@ async function recoverStuckPipelines(): Promise<void> {
 
 function startHealthServer(): void {
   const port = parseInt(process.env.PORT ?? "3000", 10);
+  const authToken = process.env.NEXTAUTH_SECRET ?? "";
+
   const server = http.createServer((req, res) => {
     if (req.url === "/health" || req.url === "/") {
       res.writeHead(200, { "Content-Type": "text/plain" });
       res.end("ok");
-    } else {
-      res.writeHead(404);
-      res.end("Not found");
+      return;
     }
+
+    // POST /api/queue — HTTP proxy for Vercel to enqueue into Railway Redis BullMQ
+    if (req.method === "POST" && req.url === "/api/queue") {
+      const auth = req.headers["authorization"] ?? "";
+      if (authToken && auth !== `Bearer ${authToken}`) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized" }));
+        return;
+      }
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", async () => {
+        try {
+          const { pipelineId, config, priority } = JSON.parse(body) as {
+            pipelineId: string;
+            config: import("../pipeline/types").PipelineConfig;
+            priority?: number;
+          };
+          const { enqueueAdvancedPipeline } = await import("../lib/queue/advanced");
+          const jobId = await enqueueAdvancedPipeline(pipelineId, config, priority ?? 5);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ jobId }));
+        } catch (err) {
+          console.error("[worker] /api/queue error:", (err as Error).message);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: String(err) }));
+        }
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end("Not found");
   });
+
   server.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code !== "EADDRINUSE") console.error("[worker] Health server error:", err.message);
   });

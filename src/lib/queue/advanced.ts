@@ -61,12 +61,35 @@ export function getAdvancedQueue(): Queue<AdvancedPipelineJob> {
   return _queue;
 }
 
-/** Enqueue a pipeline. Idempotent — duplicate pipelineIds are silently deduplicated. */
+/** Enqueue a pipeline.
+ *  On Vercel (WORKER_QUEUE_URL set): POSTs to Railway worker HTTP proxy so the job
+ *  lands on Railway's private Redis BullMQ — not Upstash.
+ *  On worker / local dev: enqueues directly to BullMQ.
+ */
 export async function enqueueAdvancedPipeline(
   pipelineId: string,
   config:     PipelineConfig,
   priority    = 5
 ): Promise<string> {
+  const workerUrl = process.env.WORKER_QUEUE_URL;
+  if (workerUrl) {
+    const res = await fetch(`${workerUrl}/api/queue`, {
+      method:  "POST",
+      headers: {
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${process.env.NEXTAUTH_SECRET ?? ""}`,
+      },
+      body: JSON.stringify({ pipelineId, config, priority }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`Worker queue HTTP ${res.status}: ${text}`);
+    }
+    const json = await res.json() as { jobId: string };
+    return json.jobId;
+  }
+
+  // Direct BullMQ path — worker process itself and local dev
   const job = await getAdvancedQueue().add(
     "run-pipeline",
     { pipelineId, config },
