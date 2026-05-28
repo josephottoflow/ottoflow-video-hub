@@ -587,20 +587,14 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
   const runPipeline = async () => {
     setRunning(true); setLogs([]); setDoneAgents(new Set()); setStageStatuses({});
     if (tier === "advanced") {
-      const pending = queue.filter(r => ["Pending", "Queued"].includes(r.status));
-      if (pending.length === 0) { toast.error("No pending rows to queue"); setRunning(false); return; }
-      let first: string | null = null;
-      for (const row of pending) {
-        const res = await fetch("/api/advanced/pipeline", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ topic: row.topic, style: row.style, rowIndex: row.rowIndex }),
-        }).catch(() => null);
-        if (res?.ok) {
-          const d = await res.json() as { pipelineId: string };
-          if (!first) { first = d.pipelineId; setActivePipelineId(d.pipelineId); }
-        }
+      const res = await fetch("/api/pipeline/v2", { method: "POST" }).catch(() => null);
+      if (res?.ok) {
+        const d = await res.json() as { queued: number };
+        if (d.queued > 0) toast.loading(`V2: ${d.queued} job(s) queued`, { id: "adv-pipeline" });
+        else toast.error("No pending V2 rows to queue");
+      } else {
+        toast.error("Failed to queue V2 pipeline");
       }
-      if (first) toast.loading(`Advanced: ${pending.length} job(s) queued`, { id: "adv-pipeline" });
     } else {
       await fetch("/api/pipeline", { method: "POST" }).catch(() => null);
     }
@@ -612,15 +606,13 @@ function CommandCenterView({ tier, setTier }: { tier: Tier; setTier: (t: Tier) =
     setStageStatuses({});
     toast.loading(`Rendering: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
     if (tier === "advanced") {
-      const res = await fetch("/api/advanced/pipeline", {
+      const res = await fetch("/api/pipeline/v2", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: row.topic, style: row.style, rowIndex: row.rowIndex }),
+        body: JSON.stringify({ rowIndex: row.rowIndex }),
       }).catch(() => null);
       setRenderingRows(prev => { const s = new Set(prev); s.delete(row.rowIndex); return s; });
       if (res?.ok) {
-        const d = await res.json() as { pipelineId: string };
-        setActivePipelineId(d.pipelineId);
-        toast.success(`Queued: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
+        toast.success(`Queued V2: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
       } else {
         toast.error(`Failed: ${displayTopic(row.topic)}`, { id: `r-${row.rowIndex}` });
       }
@@ -1451,10 +1443,11 @@ function QueueView({ tier }: { tier: Tier }) {
   const [addSaving,    setAddSaving]    = useState(false);
 
   const fetchRows = useCallback(async () => {
-    const r = await fetch("/api/queue").catch(() => null);
+    const url = tier === "advanced" ? "/api/queue?sheet=v2" : "/api/queue";
+    const r = await fetch(url).catch(() => null);
     if (r?.ok) { const d = await r.json(); setRows(d.rows || []); }
     setLoading(false);
-  }, []);
+  }, [tier]);
 
   useEffect(() => { fetchRows(); const t = setInterval(fetchRows, 8000); return () => clearInterval(t); }, [fetchRows]);
 
@@ -1469,9 +1462,9 @@ function QueueView({ tier }: { tier: Tier }) {
     toast.loading(`Rendering: ${displayTopic(row.topic)}`, { id: tid });
     let res;
     if (tier === "advanced") {
-      res = await fetch("/api/advanced/pipeline", {
+      res = await fetch("/api/pipeline/v2", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: row.topic, style: row.style, rowIndex: row.rowIndex }),
+        body: JSON.stringify({ rowIndex: row.rowIndex }),
       }).catch(() => null);
     } else {
       res = await fetch("/api/pipeline", {
@@ -1482,7 +1475,7 @@ function QueueView({ tier }: { tier: Tier }) {
     setRenderingIdx(prev => { const s = new Set(prev); s.delete(row.rowIndex); return s; });
     if (res?.ok) {
       setRenderedIdx(prev => new Set([...prev, row.rowIndex]));
-      toast.success(`Done: ${displayTopic(row.topic)}`, { id: tid });
+      toast.success(`Queued: ${displayTopic(row.topic)}`, { id: tid });
     } else {
       toast.error(`Failed: ${displayTopic(row.topic)}`, { id: tid });
     }

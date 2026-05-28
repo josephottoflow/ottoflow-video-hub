@@ -6,9 +6,13 @@
 import { NextResponse } from "next/server";
 import { SheetsClient } from "@/agents/sheets/client";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const sheets = new SheetsClient();
+    const { searchParams } = new URL(req.url);
+    const isV2 = searchParams.get("sheet") === "v2";
+    const sheets = isV2
+      ? new SheetsClient("Video Gen — Advance Tier", "v2-advanced")
+      : new SheetsClient();
     await sheets.initializeSheet();
     const rows = await sheets.getAllContent();
 
