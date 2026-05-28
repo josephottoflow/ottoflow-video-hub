@@ -40,16 +40,24 @@ export interface DbJob {
   script_text?:   string;
   quality_score?: number;
   needs_review?:  boolean;
-  progress?:      number;
-  error?:         string;
-  output_path?:   string;
-  output_link?:   string;
-  bull_job_id?:   string;
-  created_at:     Date;
-  started_at?:    Date;
-  completed_at?:  Date;
-  duration_ms?:   number;
-  retry_count:    number;
+  progress?:       number;
+  error?:          string;
+  output_path?:    string;
+  output_link?:    string;
+  bull_job_id?:    string;
+  asset_manifest?: SceneManifestEntry[];
+  created_at:      Date;
+  started_at?:     Date;
+  completed_at?:   Date;
+  duration_ms?:    number;
+  retry_count:     number;
+}
+
+export interface SceneManifestEntry {
+  id:     string;
+  beat:   string;
+  source: "veo" | "imagen3" | "procedural";
+  url?:   string;
 }
 
 export interface DbContentRow {
@@ -127,6 +135,7 @@ export async function runMigrations(): Promise<void> {
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS quality_score  FLOAT;
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS needs_review   BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress       INT NOT NULL DEFAULT 0;
+    ALTER TABLE jobs ADD COLUMN IF NOT EXISTS asset_manifest JSONB;
 
     -- Content rows synced from Google Sheets
     CREATE TABLE IF NOT EXISTS content_rows (
@@ -307,6 +316,12 @@ export async function killJob(id: string): Promise<boolean> {
 export async function updateJobProgress(id: string, progress: number): Promise<void> {
   try {
     await getDb().query(`UPDATE jobs SET progress = $2 WHERE id = $1`, [id, progress]);
+  } catch { /* non-fatal */ }
+}
+
+export async function updateJobManifest(id: string, manifest: SceneManifestEntry[]): Promise<void> {
+  try {
+    await getDb().query(`UPDATE jobs SET asset_manifest = $2 WHERE id = $1`, [id, JSON.stringify(manifest)]);
   } catch { /* non-fatal */ }
 }
 

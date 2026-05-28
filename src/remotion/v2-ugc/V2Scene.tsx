@@ -105,15 +105,20 @@ export const V2Scene: React.FC<V2SceneProps> = ({
   const frame    = useCurrentFrame();
   const progress = Math.min(frame / durationFrames, 1);
 
-  // Ken Burns parameters — only applied to Imagen3 static image (Level 2)
+  // Ken Burns parameters — applied to Imagen3 fallback (Level 2).
+  // Cinematic range: 1.0–1.20 so every frame feels alive, not slideshow.
   const kbScale = zoomDirection === "in"
-    ? interpolate(progress, [0, 1], [1.0, 1.09])
+    ? interpolate(progress, [0, 1], [1.0, 1.20])
     : zoomDirection === "out"
-    ? interpolate(progress, [0, 1], [1.09, 1.0])
-    : 1.04;
+    ? interpolate(progress, [0, 1], [1.20, 1.0])
+    : interpolate(progress, [0, 1], [1.06, 1.16]);
   const kbTranslateX = zoomDirection === "pan"
-    ? interpolate(progress, [0, 1], [-3.5, 3.5])
-    : 0;
+    ? interpolate(progress, [0, 1], [-5, 5])
+    : interpolate(progress, [0, 1], [-1.5, 1.5]);
+  // Y-axis parallax drift — makes every still image feel dimensional
+  const kbTranslateY = zoomDirection === "pan"
+    ? interpolate(progress, [0, 1], [1, -1])
+    : interpolate(progress, [0, 1], [-1.5, 1.5]);
 
   // Scene-boundary fade (8 frames in, 8 frames out)
   const opacity = interpolate(
@@ -152,16 +157,18 @@ export const V2Scene: React.FC<V2SceneProps> = ({
         </AbsoluteFill>
       )}
 
-      {/* ── Level 2: Imagen3 AI image + Ken Burns motion ── */}
+      {/* ── Level 2: Imagen3 AI image + Ken Burns + Y-parallax ── */}
       {hasImage && (
-        <AbsoluteFill style={{
-          transform:       `scale(${kbScale}) translateX(${kbTranslateX}%)`,
-          transformOrigin: "center center",
-        }}>
-          <Img
-            src={imageSrc}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
+        <AbsoluteFill style={{ overflow: "hidden" }}>
+          <AbsoluteFill style={{
+            transform:       `scale(${kbScale}) translate(${kbTranslateX}%, ${kbTranslateY}%)`,
+            transformOrigin: "center center",
+          }}>
+            <Img
+              src={imageSrc}
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          </AbsoluteFill>
         </AbsoluteFill>
       )}
 

@@ -25,7 +25,8 @@ type Tier   = "basic" | "advanced";
 
 interface LogEntry { id: number; ts: string; agent: string; message: string; level: string; }
 interface QueueRow { rowIndex: number; topic: string; style: string; status: string; avatarUrl?: string; }
-interface DbJob { id: string; topic: string; template: string; status: string; error?: string; output_link?: string; duration_ms?: number; started_at?: string; progress?: number; }
+interface SceneManifestEntry { id: string; beat: string; source: "veo" | "imagen3" | "procedural"; url?: string; }
+interface DbJob { id: string; topic: string; template: string; status: string; error?: string; output_link?: string; duration_ms?: number; started_at?: string; progress?: number; asset_manifest?: SceneManifestEntry[]; }
 interface Services { anthropic: boolean; gemini: boolean; elevenlabs: boolean; pexels: boolean; telegram: boolean; sheets: boolean; n8n: boolean; ffmpeg: boolean; remotion: boolean; branding: boolean; jamendo: boolean; }
 
 // ─── Advanced App Types ───────────────────────────────────────
@@ -3560,6 +3561,20 @@ function ActiveRendersView() {
                 <div style={{ fontWeight: 600, fontSize: 12, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayTopic(job.topic)}</div>
                 {job.status === "error" && job.error && (
                   <div style={{ fontSize: 10, color: "#f43f5e", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.error.slice(0, 100)}</div>
+                )}
+                {job.asset_manifest && job.asset_manifest.length > 0 && (
+                  <div style={{ display: "flex", gap: 3, marginTop: 4, flexWrap: "wrap" }}>
+                    {job.asset_manifest.map((s) => (
+                      <span key={s.id} title={`${s.id} [${s.beat}]`} style={{
+                        fontSize: 9, fontWeight: 700, letterSpacing: "0.3px", padding: "1px 5px", borderRadius: 3,
+                        background: s.source === "veo" ? "rgba(99,102,241,0.18)" : s.source === "imagen3" ? "rgba(16,185,129,0.14)" : "rgba(120,120,120,0.14)",
+                        color:      s.source === "veo" ? "#a78bfa"               : s.source === "imagen3" ? "#34d399"                : "#888",
+                        border:     `1px solid ${s.source === "veo" ? "rgba(99,102,241,0.3)" : s.source === "imagen3" ? "rgba(16,185,129,0.25)" : "rgba(120,120,120,0.2)"}`,
+                      }}>
+                        {s.source === "veo" ? "VEO" : s.source === "imagen3" ? "IMG" : "SYN"}
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
               <span style={{ fontSize: 10, color: "var(--text-muted)", flexShrink: 0 }}>{dur}</span>

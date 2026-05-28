@@ -34,7 +34,7 @@ import { getConfig }           from "../config/config";
 import { slugify }             from "../../lib/slug-utils";
 import { setStatus, emitLog }  from "../../lib/pipeline-store";
 import { uploadFileToR2, isR2Available } from "../../lib/r2";
-import { updateJobStatus, saveStoryboard } from "../../lib/db";
+import { updateJobStatus, saveStoryboard, updateJobManifest, SceneManifestEntry } from "../../lib/db";
 import type { PipelineResult } from "./orchestrator";
 import type { V2UGCData }      from "../../remotion/v2-ugc/types";
 import type { DesignSpec }     from "../design/design-agent";
@@ -411,12 +411,15 @@ export class PipelineOrchestratorV2 {
 
       // Railway-visible asset manifest — confirms each scene's asset source
       console.log(`[v2] asset manifest for job ${slug}:`);
-      storyboardData.scenes.forEach((scene, i) => {
+      const assetManifest: SceneManifestEntry[] = storyboardData.scenes.map((scene, i) => {
         const clip = clipUrlMap[scene.id];
         const img  = imageUrlMap[scene.id];
+        const source: SceneManifestEntry["source"] = clip ? "veo" : img ? "imagen3" : "procedural";
         const src  = clip ? `VEO:${clip.slice(-40)}` : img ? `IMG:${img.slice(-40)}` : "PROCEDURAL (dark gradient)";
         console.log(`  scene${i+1} [${scene.beat}] → ${src}`);
+        return { id: scene.id, beat: scene.beat, source, url: clip || img || undefined };
       });
+      if (dbJobId) updateJobManifest(dbJobId, assetManifest).catch(() => {});
 
       // ── Pre-render asset validation ───────────────────────────────────────
       // Safety net: catch any localhost URLs that leaked through (should never happen after P0 fix).
