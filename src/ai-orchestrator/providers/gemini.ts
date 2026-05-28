@@ -24,8 +24,10 @@ export class GeminiProvider implements AIProvider {
         ...(systemPrompt ? { systemInstruction: systemPrompt } : {}),
         maxOutputTokens: opts.maxTokens,
         temperature:     opts.temperature,
-        // responseMimeType:"application/json" causes response truncation in some
-        // regions/quotas. We rely on prompt instructions + post-processing instead.
+        // Disable thinking mode — gemini-2.5-flash uses internal reasoning tokens
+        // by default, consuming most of maxOutputTokens and leaving only ~90 tokens
+        // for actual visible output (causing JSON truncation).
+        thinkingConfig: { thinkingBudget: 0 },
       },
     });
 

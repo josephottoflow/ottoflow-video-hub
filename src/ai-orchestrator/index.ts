@@ -1,5 +1,4 @@
 import { GeminiProvider } from "./providers/gemini";
-import { ClaudeProvider } from "./providers/claude";
 
 /** Extract parseable JSON from an AI response that may contain preamble/markdown */
 function extractJSON(raw: string): string | null {
@@ -42,13 +41,8 @@ export class AIOrchestrator {
         console.warn("[ai-orchestrator] Gemini init failed:", (e as Error).message);
       }
     }
-    if (process.env.ANTHROPIC_API_KEY) {
-      try { this.providers.set("claude", new ClaudeProvider()); } catch (e) {
-        console.warn("[ai-orchestrator] Claude init failed:", (e as Error).message);
-      }
-    }
     const active = [...this.providers.keys()];
-    console.log(`[ai-orchestrator] Active providers: ${active.length ? active.join(", ") : "NONE"}`);
+    console.log(`[ai-orchestrator] Active providers: ${active.length ? active.join(", ") : "NONE — check GOOGLE_API_KEY"}`);
   }
 
   async generate(req: AIRequest): Promise<AIResponse> {

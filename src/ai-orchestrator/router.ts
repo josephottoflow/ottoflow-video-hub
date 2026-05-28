@@ -45,13 +45,11 @@ const ROUTES: Record<TaskType, { basic: RouteConfig; advanced: RouteConfig }> = 
 };
 
 export const FALLBACK_CHAINS: Record<string, string[]> = {
-  gemini: ["gemini", "claude"],
-  claude: ["claude", "gemini"],
+  gemini: ["gemini"],
 };
 
 export const FALLBACK_MODEL_FOR_PROVIDER: Record<string, string> = {
   gemini: "gemini-2.5-flash",
-  claude: "claude-haiku-4-5-20251001",
 };
 
 export function resolveRoute(taskType: TaskType, tier: Tier = "basic"): RouteConfig {
